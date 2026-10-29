@@ -1,0 +1,23 @@
+# Swift
+.build/
+/build/
+.swiftpm/
+
+# 秘密情報
+oauth_config.json
+.fm-ee2e.key
+google_credentials.json
+rclone.conf
+client_secret*.json
+
+# ダウンロード途中の一時ファイル
+*.fm-ee2e-partial
+
+# macOS
+.DS_Store
+
+# エディタ
+*.swp
+*~
+.vscode/
+.idea/
