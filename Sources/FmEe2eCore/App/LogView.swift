@@ -247,11 +247,11 @@ final class LogView: LogListView {
 
   /// 一覧は新しい順なので、[first] が一番新しく、[last] が一番古い。
   override func openRange(_ first: Int, _ last: Int) async throws {
+    let (app, git, root) = (app, git, root)
     let newest = commits[first]
     let oldest = commits[last]
     let files = try await app.withProgress(tr("log_view.running", ["command": "git diff"])) { try await git.rangeFiles(root, oldest.hash, newest.hash) }
     let range = "\(oldest.shortHash)..\(newest.shortHash)"
-    let (app, git, root) = (app, git, root)
     await app.showModal { (close: @escaping (()) -> Void) in
       CommitFilesView(
         app,
@@ -277,9 +277,9 @@ final class LogView: LogListView {
   }
 
   override func open(_ index: Int) async throws {
+    let (app, git, root) = (app, git, root)
     let commit = commits[index]
     let files = try await app.withProgress(tr("log_view.running", ["command": "git show"])) { try await git.commitFiles(root, commit.hash) }
-    let (app, git, root) = (app, git, root)
     await app.showModal { (close: @escaping (()) -> Void) in
       CommitFilesView(
         app,
