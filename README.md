@@ -27,7 +27,7 @@ Mac 専用です。
 続けて、次の灰色の枠の中の文字をまとめてコピーしてターミナルに貼り付け、`return` を押します。
 
 ```bash
-mkdir -p ~/.config
+mkdir ~/.config
 cp -R fm-ee2e ~/.config/
 ```
 
