@@ -192,7 +192,7 @@ final class TerminalModal: Modal, SelectionSource {
             x + col,
             y + row,
             cell.text,
-            link == nil ? style : style.copyWith(link: link),
+            link == nil ? style : style.copyWith(underline: true, link: link),
             maxWidth: width - col
           )
         }

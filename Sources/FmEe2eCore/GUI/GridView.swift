@@ -666,9 +666,11 @@ final class GridView: NSView, NSTextInputClient {
   override func mouseUp(with event: NSEvent) {
     stopAutoscroll()
     dragPoint = nil
+    // ドラッグせずにクリックしただけなら、そこのリンクを開く。
     if let current = selection, current.anchor == current.head {
       selection = nil
       needsDisplay = true
+      openLink(at: convert(event.locationInWindow, from: nil))
     }
   }
 
@@ -705,9 +707,16 @@ final class GridView: NSView, NSTextInputClient {
     needsDisplay = true
   }
 
-  /// ⌘+クリックで、リンク（git push のあとの URL など）を開く。
+  /// クリック（⌘+クリックでも）で、リンク（git push のあとの URL など）を開く。
   private func openLink(at point: CGPoint) {
-    guard let screen = host.screen else { return }
+    if let link = link(at: point), let url = URL(string: link) {
+      NSWorkspace.shared.open(url)
+    }
+  }
+
+  /// [point] にあるリンク先。なければ nil。
+  private func link(at point: CGPoint) -> String? {
+    guard let screen = host.screen else { return nil }
     var link: String?
     walk(screen, gridOrigin, nil) { s, origin, _ in
       let fonts = host.fonts(s.theme)
@@ -717,8 +726,23 @@ final class GridView: NSView, NSTextInputClient {
         link = cell.style.link
       }
     }
-    if let link, let url = URL(string: link) {
-      NSWorkspace.shared.open(url)
+    return link
+  }
+
+  override func updateTrackingAreas() {
+    super.updateTrackingAreas()
+    for area in trackingAreas {
+      removeTrackingArea(area)
+    }
+    addTrackingArea(NSTrackingArea(rect: .zero, options: [.mouseMoved, .activeInKeyWindow, .inVisibleRect], owner: self))
+  }
+
+  /// リンクの上では、指の形のカーソルにする。
+  override func mouseMoved(with event: NSEvent) {
+    if link(at: convert(event.locationInWindow, from: nil)) != nil {
+      NSCursor.pointingHand.set()
+    } else {
+      NSCursor.arrow.set()
     }
   }
 
