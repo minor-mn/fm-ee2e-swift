@@ -1,5 +1,4 @@
-// fm-ee2e の設定（自分用）。~/.config/fm-ee2e/config.json5 にコピーして使う。
-// 書ける項目は config.example.json5 を見る。
+// fm-ee2e の設定。fm-ee2e フォルダーごと ~/.config にコピーして使う（~/.config/fm-ee2e/config.json5）。
 {
   // 画面の言葉（languages/<language>.json5）。ja（日本語）・en（英語）。書かなければ ja。
   language: "en",

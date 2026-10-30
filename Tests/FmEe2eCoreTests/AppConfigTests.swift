@@ -6,7 +6,7 @@ import Testing
 private func parse(_ text: String) throws -> AppConfig { try AppConfig.parse(Data(text.utf8)) }
 
 @Test func exampleConfigIsAllOn() throws {
-  let file = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../config.example.json5")
+  let file = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("../../fm-ee2e/config.json5")
   #expect(try AppConfig.parse(Data(contentsOf: file)).rightTabs == RightMode.allCases)
 }
 

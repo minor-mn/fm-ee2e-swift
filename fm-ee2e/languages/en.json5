@@ -1,4 +1,4 @@
-// The English UI text of fm-ee2e. Copy it to ~/.config/fm-ee2e/languages/en.json5 to use it.
+// The English UI text of fm-ee2e. Copied to ~/.config/fm-ee2e/languages/en.json5 with the fm-ee2e folder.
 // Each {name} is replaced by a name, a count and so on. An array is one text, its items joined with line breaks.
 {
   // Errors in the config file (config.json5)

@@ -1,4 +1,4 @@
-// fm-ee2e の画面に出す文言。~/.config/fm-ee2e/languages/ja.json5 にコピーして使う。
+// fm-ee2e の画面に出す文言。fm-ee2e フォルダーごと ~/.config にコピーして使う（~/.config/fm-ee2e/languages/ja.json5）。
 // {name} の形のところには、名前や件数などが入る。配列は、改行でつないだ1つの文言になる。
 {
   // 設定ファイル（config.json5）の誤り
