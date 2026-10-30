@@ -128,6 +128,7 @@
     config_reload_failed: "~/.config/fm-ee2e/config.json5 を読み込めません。今の設定のままです。\n{error}",
     // メニュー
     menu: {
+      open: "fm-ee2e-swift を開く",
       quit: "fm-ee2e-swift を終了",
       edit: "編集",
       copy: "コピー",

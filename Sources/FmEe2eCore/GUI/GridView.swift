@@ -753,9 +753,6 @@ final class GridView: NSView, NSTextInputClient {
       zoomOut(nil)
     case "0":
       zoomReset(nil)
-    case "q":
-      // ⌘Q では終了しない。「q」として届かないよう、ここで受けて何もしない。
-      break
     default:
       return super.performKeyEquivalent(with: event)
     }

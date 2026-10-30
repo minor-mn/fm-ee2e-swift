@@ -25,7 +25,7 @@ public func runFmEe2eGUI() -> Never {
 private final class GuiAppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
   private var window: NSWindow?
 
-  /// 終了する（窓を閉じる・メニューや Dock の終了）。
+  /// 終了する（⌘Q・窓を閉じる・メニューや Dock の終了）。
   private var requestQuit: (() -> Void)?
 
   private var host: GuiHost?
@@ -165,6 +165,19 @@ private final class GuiAppDelegate: NSObject, NSApplicationDelegate, NSWindowDel
     requestQuit?()
     return false
   }
+
+  /// このアプリをもう1つ起動して、新しい窓を開く（メニューの「fm-ee2e-swift を開く」・⌘S）。
+  @objc func openNewInstance(_ sender: Any?) {
+    let bundle = Bundle.main.bundleURL
+    if bundle.pathExtension == "app" {
+      let configuration = NSWorkspace.OpenConfiguration()
+      configuration.createsNewApplicationInstance = true
+      NSWorkspace.shared.openApplication(at: bundle, configuration: configuration)
+    } else if let executable = Bundle.main.executableURL {
+      // .app にまとめずに動かしているとき（swift run など）は、実行ファイルをそのまま起動する。
+      _ = try? Process.run(executable, arguments: [])
+    }
+  }
 }
 
 private func makeMainMenu() -> NSMenu {
@@ -181,8 +194,14 @@ private func makeMainMenu() -> NSMenu {
   func item(_ title: String, _ action: Selector, _ key: String) -> NSMenuItem {
     NSMenuItem(title: title, action: action, keyEquivalent: key)
   }
-  // 終了は ⌘Q では効かせない（窓を閉じるか、メニュー・Dock から）。
-  submenu("fm-ee2e-swift", [item(tr("gui_app.menu.quit"), #selector(NSApplication.terminate(_:)), "")])
+  submenu(
+    "fm-ee2e-swift",
+    [
+      item(tr("gui_app.menu.open"), #selector(GuiAppDelegate.openNewInstance(_:)), "s"),
+      .separator(),
+      item(tr("gui_app.menu.quit"), #selector(NSApplication.terminate(_:)), "q"),
+    ]
+  )
   submenu(
     tr("gui_app.menu.edit"),
     [
