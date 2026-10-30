@@ -10,7 +10,7 @@ private let repoRoot = URL(fileURLWithPath: #filePath).deletingLastPathComponent
 struct StringsTests {
   @Test("languages/ja.json5 を読めて、コードで使っている文言の名前がすべてある")
   func everyKeyExists() throws {
-    let table = try Strings.parse(try Data(contentsOf: repoRoot.appending(path: "languages/ja.json5")))
+    let table = try Strings.parse(try Data(contentsOf: repoRoot.appending(path: "fm-ee2e/languages/ja.json5")))
     let pattern = try NSRegularExpression(pattern: #"\btr\(\s*(?:[a-z]+ \? )?"([a-z_.]+)"(?: : "([a-z_.]+)")?"#)
     var used: Set<String> = []
     let sources = FileManager.default.enumerator(at: repoRoot.appending(path: "Sources"), includingPropertiesForKeys: nil)!
@@ -30,8 +30,8 @@ struct StringsTests {
 
   @Test("languages/en.json5 は ja.json5 と同じ名前を持ち、同じ {name} を使う")
   func englishMatchesJapanese() throws {
-    let ja = try Strings.parse(try Data(contentsOf: repoRoot.appending(path: "languages/ja.json5")))
-    let en = try Strings.parse(try Data(contentsOf: repoRoot.appending(path: "languages/en.json5")))
+    let ja = try Strings.parse(try Data(contentsOf: repoRoot.appending(path: "fm-ee2e/languages/ja.json5")))
+    let en = try Strings.parse(try Data(contentsOf: repoRoot.appending(path: "fm-ee2e/languages/en.json5")))
     #expect(Set(en.keys) == Set(ja.keys))
     let placeholder = try NSRegularExpression(pattern: #"\{[a-z_]+\}"#)
     func names(_ text: String) -> Set<String> {

@@ -23,8 +23,13 @@ jobs:
       - name: Sign ad-hoc
         run: codesign --force --deep -s - .build/fm-ee2e.app
 
+      # アプリと、~/.config にコピーする fm-ee2e フォルダーを1つのフォルダーにまとめる。
       - name: Zip app
-        run: ditto -c -k --keepParent .build/fm-ee2e.app "fm-ee2e-swift-${GITHUB_REF_NAME}.zip"
+        run: |
+          dir="fm-ee2e-swift-${GITHUB_REF_NAME}"
+          mkdir "$dir"
+          cp -R .build/fm-ee2e.app fm-ee2e "$dir/"
+          ditto -c -k --keepParent "$dir" "$dir.zip"
 
       - name: Create release
         env:

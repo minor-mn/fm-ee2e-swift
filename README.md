@@ -14,61 +14,41 @@ Mac 専用です。
 
 ### 1. ダウンロードする
 
-1. ブラウザで https://github.com/minor-mn/fm-ee2e-swift を開きます。
-2. 緑の **Code** ボタンを押して、**Download ZIP** を押します。
-3. 「ダウンロード」フォルダーにできた `fm-ee2e-swift-main.zip` をダブルクリックします。`fm-ee2e-swift-main` というフォルダーができます。
+1. ブラウザで https://github.com/minor-mn/fm-ee2e-swift/releases を開きます。
+2. いちばん上にある `fm-ee2e-swift-v〜.zip` を押してダウンロードします。
+3. 「ダウンロード」フォルダーにできた zip をダブルクリックします。`fm-ee2e-swift-v〜` というフォルダーができて、中に `fm-ee2e.app` と `fm-ee2e` フォルダーが入っています。
 
-### 2. ターミナルを開く
+### 2. 初期設定
 
 `command` を押しながら `スペース` を押して、`ターミナル` と打って `return` を押します。
 
-ここから先の灰色の枠の中の文字は、枠ごとにまとめてコピーしてターミナルに貼り付け、`return` を押して実行します。
+`cd ` と打ってから（`cd` のあとに半角スペースを1つ）、Finder から `fm-ee2e-swift-v〜` フォルダーをターミナルの画面にドラッグして `return` を押します。
 
-### 3. 開発ツールを入れる
-
-```bash
-xcode-select --install
-```
-
-「インストール」を押して、終わるまで待ちます（数分かかります）。「すでに入っています」と出たら、そのまま次へ進んでください。
-
-入ったかどうかは、次で確かめられます。
+続けて、次の灰色の枠の中の文字をまとめてコピーしてターミナルに貼り付け、`return` を押します。
 
 ```bash
-swift --version
+mkdir -p ~/.config
+cp -R fm-ee2e ~/.config/
 ```
 
-`Swift version 6.2` 以上の数字が出れば OK です。
+### 3. アプリをアプリケーションフォルダーに入れる
 
-### 4. アプリを作る
+Finder で、`fm-ee2e.app` を「アプリケーション」フォルダーにドラッグします。
 
-```bash
-cd ~/Downloads/fm-ee2e-swift-main
-sh scripts/make-app.sh
-```
+### 4. 起動する
 
-数分かかります。最後に `.build/fm-ee2e.app` と出たら完成です。
+「アプリケーション」フォルダーにある **fm-ee2e** をダブルクリックします。
 
-`No such file or directory` と出たときは、フォルダーが「ダウンロード」以外の場所にあります。`cd ` と打ってから（`cd` のあとに半角スペースを1つ）、Finder から `fm-ee2e-swift-main` フォルダーをターミナルの画面にドラッグして `return` を押し、もう一度 `sh scripts/make-app.sh` を実行します。
+初めてのときは「"fm-ee2e.app" は開いていません」と出るので、**完了** を押します。そのあと、
 
-### 5. 初期設定
+1. 「システム設定」→「プライバシーとセキュリティ」を開いて、下のほうへスクロールします。
+2. 次のところの **このまま開く** を押します。
 
-```bash
-mkdir -p ~/.config/fm-ee2e
-cp -r languages ~/.config/fm-ee2e/
-cp -r images ~/.config/fm-ee2e/
-cp config.example.json5 ~/.config/fm-ee2e/config.json5
-```
+   ![このまま開く](open-anyway.png)
 
-### 6. アプリをアプリケーションフォルダーに入れる
+3. もう一度 **fm-ee2e** をダブルクリックして、出てきた画面でも **このまま開く** を押します。
 
-```bash
-cp -R .build/fm-ee2e.app /Applications/
-```
-
-### 7. 起動する
-
-Finder の「アプリケーション」フォルダーにある **fm-ee2e** をダブルクリックします。
+2回目からは、ダブルクリックだけで開きます。
 
 左右の窓にファイルが並べば成功です。
 
@@ -110,7 +90,11 @@ https://ipv4.google.com/intl/ja/drive/download/
 
 ### Git
 
-準備は要りません（3. で入れた開発ツールに入っています）。
+Git が入っていないときは、ターミナルで次を実行して「インストール」を押します（数分かかります）。
+
+```bash
+xcode-select --install
+```
 
 右の窓を「Git」にすると、**左の窓で開いているフォルダー**の Git の状態が出ます。左の窓で、Git で管理しているフォルダーを開いてください。
 
@@ -185,3 +169,36 @@ open -e ~/.config/fm-ee2e/config.json5
 - タブのブロックに書いていないものは、`default` の値、`default` にもなければ `window` の値が使われます。
 - 背景の画像は、`~/.config/fm-ee2e/images` に画像を置いて、そのパスを `path` に書きます。
 - Google Drive と iCloud Drive のタブの上の帯には、開いているフォルダーの中身の合計の大きさ（Used）が出ます。フォルダーを開くたびに中を全部数えるので、ファイルがとても多くて動きが重いと感じたら、`google_drive` や `icloud` のブロックに `show_used: false` を書くと、数えるのをやめて軽くなります。
+---
+
+## アプリを自分で作る
+
+ダウンロードしたアプリの代わりに、自分で作ることもできます。
+
+1. https://github.com/minor-mn/fm-ee2e-swift の緑の **Code** ボタンから **Download ZIP** を押して、できた zip をダブルクリックします。
+2. ターミナルで開発ツールを入れます。
+
+   ```bash
+   xcode-select --install
+   ```
+
+   `swift --version` で `Swift version 6.4` 以上の数字が出れば OK です。
+
+3. アプリを作ります。
+
+   ```bash
+   cd ~/Downloads/fm-ee2e-swift-main
+   sh scripts/make-app.sh
+   ```
+
+   最後に `.build/fm-ee2e.app` と出たら完成です。
+
+4. 初期設定をして、アプリをアプリケーションフォルダーに入れます。
+
+   ```bash
+   mkdir -p ~/.config
+   cp -R fm-ee2e ~/.config/
+   cp -R .build/fm-ee2e.app /Applications/
+   ```
+
+自分で作ったアプリは、「このまま開く」を押さなくても開けます。
