@@ -24,6 +24,12 @@ curl -fsSL https://raw.githubusercontent.com/minor-mn/fm-ee2e-swift/main/scripts
 
 「インストールしました。」と出たら完了です。
 
+> 「curl で入れたら最後、二度と消せない」という噂を聞いたので、消すコマンドも作りました。消えるのはアプリと画像たちだけで、設定（config.json5）と Google Drive の鍵は、思い出として残しておきます（思い出もいらなければ、`rm -rf ~/.config/fm-ee2e` で完全に無かったことにできます）。
+>
+> ```bash
+> curl -fsSL https://raw.githubusercontent.com/minor-mn/fm-ee2e-swift/main/scripts/uninstall.sh | sh
+> ```
+
 ### 2. 起動する
 
 「アプリケーション」フォルダーにある **fm-ee2e** をダブルクリックします。
