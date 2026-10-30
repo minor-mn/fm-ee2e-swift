@@ -549,7 +549,7 @@ final class MainView: View, Workspace {
   /// 終了している途中。
   private var quitting = false
 
-  /// 確認せずに終了する（窓を閉じる・メニューや Dock の終了）。操作の途中や、ダイアログを開いていても終了する。
+  /// 確認せずに終了する（⌘Q・窓を閉じる・メニューや Dock の終了）。操作の途中や、ダイアログを開いていても終了する。
   func quit() async {
     if quitting {
       return
