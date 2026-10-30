@@ -6,8 +6,11 @@ class LogListView: Modal {
   init(_ app: App, _ close: @escaping (()) -> Void, _ title: String) {
     self.app = app
     self.close = close
-    super.init(title, accent: Palette.orange)
+    super.init(title, accent: Appearance.current.theme(.git).colors.accent(or: \.orange))
   }
+
+  /// git のタブの見た目で描く。
+  override var themeKey: ThemeKey { .git }
 
   let app: App
   let close: (()) -> Void
@@ -52,11 +55,11 @@ class LogListView: Modal {
   override var frame: ModalFrame { .page }
 
   override var hints: [(String, String)] {
-    [("↑↓ PgUp PgDn", "移動")]
-      + (markable ? [("Space", "マーク")] : [])
-      + [("Enter", "開く")]
-      + (editable ? [("E", "作者・メッセージを直す")] : [])
-      + [("Esc / q", "戻る")]
+    [("↑↓ PgUp PgDn", tr("log_view.hints.move"))]
+      + (markable ? [("Space", tr("log_view.hints.mark"))] : [])
+      + [("Enter", tr("log_view.hints.open"))]
+      + (editable ? [("E", tr("log_view.hints.edit"))] : [])
+      + [("Esc / q", tr("log_view.hints.back"))]
   }
 
   /// [action] を実行し、その間のキーは無視する。失敗したらエラーを出す。
@@ -146,9 +149,9 @@ class LogListView: Modal {
 /// コミット [hash] の作者（名前・メールアドレス）とメッセージを聞いて書き換える。書き換えたら true。
 /// 署名されたコミット（あとに続くものを含む）は書き換えない。push 済みなら確かめる。
 private func editCommit(_ app: App, _ git: Git, _ root: String, _ hash: String) async throws -> Bool {
-  let rewrite = try await app.withProgress("git cat-file 中…") { try await git.prepareAuthorRewrite(root, hash) }
+  let rewrite = try await app.withProgress(tr("log_view.running", ["command": "git cat-file"])) { try await git.prepareAuthorRewrite(root, hash) }
   if rewrite.signed != nil {
-    await app.showError("直近のコミット以外はサポート外です。(続行すると署名が消えるコミットがあります)")
+    app.showStatus(tr("log_view.edit.signed"))
     return false
   }
   let (oldName, oldEmail) = rewrite.target.author
@@ -156,46 +159,45 @@ private func editCommit(_ app: App, _ git: Git, _ root: String, _ hash: String) 
   // 名前とメールアドレスには、git が区切りに使う < > と改行は使えない。
   func check(_ value: String, _ what: String) -> String? {
     value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-      ? "\(what)を入力してください。"
+      ? tr("log_view.edit.required", ["what": what])
       : value.unicodeScalars.contains(where: { $0 == "<" || $0 == ">" || $0 == "\n" })
-      ? "\(what)に < > は使えません。"
+      ? tr("log_view.edit.no_angle_brackets", ["what": what])
       : nil
   }
   guard
-    let name = (await app.input("作者の名前", initial: oldName, validate: { check($0, "名前") }))?
+    let name = (await app.input(tr("log_view.edit.author_name"), initial: oldName, validate: { check($0, tr("log_view.edit.name")) }))?
       .trimmingCharacters(in: .whitespacesAndNewlines)
   else {
     return false
   }
   guard
-    let email = (await app.input("作者のメールアドレス", initial: oldEmail, validate: { check($0, "メールアドレス") }))?
+    let email = (await app.input(tr("log_view.edit.author_email"), initial: oldEmail, validate: { check($0, tr("log_view.edit.email")) }))?
       .trimmingCharacters(in: .whitespacesAndNewlines)
   else {
     return false
   }
   let message = (await app.input(
-    "コミットメッセージ",
+    tr("log_view.edit.message"),
     initial: oldMessage,
     allowNewlines: true,
-    validate: { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "コミットメッセージを入力してください。" : nil }
+    validate: { $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? tr("log_view.edit.message_required") : nil }
   )).map(trimRight)
   guard let message, !(same(name, oldName) && same(email, oldEmail) && same(message, oldMessage)) else {
     return false
   }
   let later = rewrite.after.count
-  if try await app.withProgress("git branch 中…", { try await git.isPushed(root, hash) }),
+  if try await app.withProgress(tr("log_view.running", ["command": "git branch"]), { try await git.isPushed(root, hash) }),
     !(await app.confirm(
-      "コミットの書き換え",
-      "このコミットは push 済みです。書き換えると、リモートと食い違います。\n"
-        + "リモートに反映するには、git push --force-with-lease が要ります。\n"
-        + (later == 0 ? "" : "あとに続く\(later)件のコミットも作り直します。\n")
-        + "続けますか？",
-      yes: "書き換える"
+      tr("log_view.edit.rewrite_title"),
+      tr("log_view.edit.pushed") + "\n"
+        + (later == 0 ? "" : tr("log_view.edit.later", ["count": later]) + "\n")
+        + tr("log_view.edit.continue"),
+      yes: tr("log_view.edit.rewrite_yes")
     ))
   {
     return false
   }
-  try await app.withProgress("コミットを書き換え中…") {
+  try await app.withProgress(tr("log_view.edit.rewriting")) {
     try await git.rewriteAuthor(root, rewrite, name: name, email: email, message: same(message, oldMessage) ? nil : message)
   }
   return true
@@ -228,7 +230,7 @@ final class LogView: LogListView {
   let branch: String
   var commits: [GitCommit]
 
-  override var heading: String { "\(title)  \(commits.count)件" }
+  override var heading: String { tr("log_view.heading_count", ["title": title, "count": commits.count]) }
 
   override var length: Int { commits.count }
 
@@ -236,7 +238,7 @@ final class LogView: LogListView {
 
   override func edit(_ index: Int) async throws {
     if try await editCommit(app, git, root, commits[index].hash) {
-      commits = try await app.withProgress("git log 中…") { try await git.log(root) }
+      commits = try await app.withProgress(tr("log_view.running", ["command": "git log"])) { try await git.log(root) }
       marks.removeAll()
     }
   }
@@ -247,14 +249,14 @@ final class LogView: LogListView {
   override func openRange(_ first: Int, _ last: Int) async throws {
     let newest = commits[first]
     let oldest = commits[last]
-    let files = try await app.withProgress("git diff 中…") { try await git.rangeFiles(root, oldest.hash, newest.hash) }
+    let files = try await app.withProgress(tr("log_view.running", ["command": "git diff"])) { try await git.rangeFiles(root, oldest.hash, newest.hash) }
     let range = "\(oldest.shortHash)..\(newest.shortHash)"
     let (app, git, root) = (app, git, root)
     await app.showModal { (close: @escaping (()) -> Void) in
       CommitFilesView(
         app,
         close,
-        "\(range)  \(last - first + 1)件",
+        tr("log_view.heading_count", ["title": range, "count": last - first + 1]),
         files,
         { try await git.rangeDiff(root, oldest.hash, newest.hash) },
         range
@@ -262,7 +264,7 @@ final class LogView: LogListView {
     }
   }
 
-  override var empty: String { "コミットはまだありません。" }
+  override var empty: String { tr("log_view.empty.commits") }
 
   override func drawRow(_ screen: Screen, _ y: Int, _ w: Int, _ index: Int, _ style: Style) {
     let c = commits[index]
@@ -276,7 +278,7 @@ final class LogView: LogListView {
 
   override func open(_ index: Int) async throws {
     let commit = commits[index]
-    let files = try await app.withProgress("git show 中…") { try await git.commitFiles(root, commit.hash) }
+    let files = try await app.withProgress(tr("log_view.running", ["command": "git show"])) { try await git.commitFiles(root, commit.hash) }
     let (app, git, root) = (app, git, root)
     await app.showModal { (close: @escaping (()) -> Void) in
       CommitFilesView(
@@ -311,7 +313,7 @@ final class FileLogView: LogListView {
   let path: String
   var commits: [FileCommit]
 
-  override var heading: String { "\(title)  \(commits.count)件" }
+  override var heading: String { tr("log_view.heading_count", ["title": title, "count": commits.count]) }
 
   override var length: Int { commits.count }
 
@@ -319,7 +321,7 @@ final class FileLogView: LogListView {
 
   override func edit(_ index: Int) async throws {
     if try await editCommit(app, git, root, commits[index].commit.hash) {
-      commits = try await app.withProgress("git log 中…") { try await git.fileLog(dir, path) }
+      commits = try await app.withProgress(tr("log_view.running", ["command": "git log"])) { try await git.fileLog(dir, path) }
       marks.removeAll()
     }
   }
@@ -334,18 +336,18 @@ final class FileLogView: LogListView {
     if !same(newest.file.path, paths[0]) {
       paths.append(newest.file.path)
     }
-    let diff = try await app.withProgress("git diff 中…") {
+    let diff = try await app.withProgress(tr("log_view.running", ["command": "git diff"])) {
       try await git.rangeDiff(root, oldest.commit.hash, newest.commit.hash, paths: paths)
     }
     if diff.isEmpty {
-      await app.showError("差分はありません。")
+      app.showStatus(tr("log_view.no_diff"))
       return
     }
     let range = "\(oldest.commit.shortHash)..\(newest.commit.shortHash)"
     await app.showModal { (close: @escaping (()) -> Void) in DiffView(diff.map { (file: $0, section: range) }, close) }
   }
 
-  override var empty: String { "このファイルのコミットはまだありません。" }
+  override var empty: String { tr("log_view.empty.file_commits") }
 
   override func drawRow(_ screen: Screen, _ y: Int, _ w: Int, _ index: Int, _ style: Style) {
     let commit = commits[index].commit
@@ -364,9 +366,9 @@ final class FileLogView: LogListView {
   override func open(_ index: Int) async throws {
     let commit = commits[index].commit
     let file = commits[index].file
-    let diff = try await app.withProgress("git show 中…") { try await git.fileDiff(root, commit.hash, file) }
+    let diff = try await app.withProgress(tr("log_view.running", ["command": "git show"])) { try await git.fileDiff(root, commit.hash, file) }
     if diff.isEmpty {
-      await app.showError("差分はありません。")
+      app.showStatus(tr("log_view.no_diff"))
       return
     }
     await app.showModal { (close: @escaping (()) -> Void) in
@@ -404,7 +406,7 @@ final class CommitFilesView: LogListView {
 
   override var length: Int { files.count }
 
-  override var empty: String { "変わったファイルはありません。" }
+  override var empty: String { tr("log_view.empty.files") }
 
   override func drawRow(_ screen: Screen, _ y: Int, _ w: Int, _ index: Int, _ style: Style) {
     let file = files[index]
@@ -425,11 +427,11 @@ final class CommitFilesView: LogListView {
     if let loaded = self.diff {
       diff = loaded
     } else {
-      diff = try await app.withProgress("git diff 中…", loadDiff)
+      diff = try await app.withProgress(tr("log_view.running", ["command": "git diff"]), loadDiff)
     }
     self.diff = diff
     if diff.isEmpty {
-      await app.showError("差分はありません。")
+      app.showStatus(tr("log_view.no_diff"))
       return
     }
     // 選んだファイルのページから開く（← → で同じコミットのほかのファイルへ）。

@@ -10,35 +10,35 @@ protocol View: AnyObject {
 
 /// 描画とキー入力の振り分け。ダイアログは積み重ね、最前面だけがキーを受け取る。
 final class App {
-  init(_ terminal: Terminal) {
-    self.terminal = terminal
+  init(_ host: Host) {
+    self.host = host
   }
 
-  let terminal: Terminal
+  let host: Host
   var root: View!
   private var modals: [View] = []
-  private var previous: Screen?
   private var scheduled = false
   private var done = false
   private var doneWaiters: [CheckedContinuation<Void, Never>] = []
 
   var hasModal: Bool { !modals.isEmpty }
 
-  /// Ctrl+C を、このアプリの終了ではなく、枠の中で動かしているプログラムに届けるとき。
-  var interrupt: (() -> Void)?
+  /// 選んでいる窓のタブの見た目。枠の中の端末（[TerminalModal]）はこの見た目で描く。
+  var activeTheme = ThemeKey.defaults
+
+  /// 窓全体の見た目で幅 [width]・高さ [height] の範囲に、見た目 [theme] のセルが何桁・何行入るか。
+  func gridSize(_ width: Int, _ height: Int, theme: ThemeKey) -> (Int, Int) {
+    host.sizer?.gridSize(width, height, from: .window, to: theme) ?? (width, height)
+  }
 
   func run(_ initial: View) async {
     root = initial
-    terminal.keys.listen { [unowned self] key in
-      if terminal.suspended {
-        return
-      }
+    host.keys.listen { [unowned self] key in
       let target = modals.last ?? root!
       target.handleKey(key)
       requestRender()
     }
-    terminal.resizes.listen { [unowned self] in
-      previous = nil
+    host.resizes.listen { [unowned self] in
       requestRender()
     }
     requestRender()
@@ -95,37 +95,18 @@ final class App {
     }
   }
 
-  /// 端末を [action]（子プロセスなど）に渡し、終わったら画面に戻る。
-  /// 戻る前にキー（[enterToReturn] なら Enter）を待つ。[waitForKey] が結果を見て false を返したときは待たない。
-  func runExternal<T>(
-    _ action: () async throws -> T,
-    waitForKey: ((T) -> Bool)? = nil,
-    enterToReturn: Bool = false
-  ) async throws -> T {
-    terminal.suspend()
-    do {
-      let result = try await action()
-      let wait = waitForKey?(result) ?? true
-      await returnFromExternal(wait: wait, enterToReturn: enterToReturn)
-      return result
-    } catch {
-      await returnFromExternal(wait: true, enterToReturn: enterToReturn)
-      throw error
-    }
-  }
+  /// ステータスバー（下に出している状態の表示）。しばらくすると消える。
+  private var status: String?
+  private var statusTimer: OneShotTimer?
 
-  private func returnFromExternal(wait: Bool, enterToReturn: Bool) async {
-    if wait {
-      terminal.write("\n\u{1b}[7m \(enterToReturn ? "Enter で戻ります" : "何かキーを押すと戻ります")\u{1b}[0m")
+  /// 状態を、キー操作の要らないステータスバーに出す（ダイアログは出さない）。4秒で消える。
+  func showStatus(_ text: String) {
+    status = text
+    statusTimer?.cancel()
+    statusTimer = OneShotTimer(milliseconds: 4000) { [weak self] in
+      self?.status = nil
+      self?.requestRender()
     }
-    await terminal.resume(waitFor: !wait ? nil : (enterToReturn ? { $0.name == "enter" } : { _ in true }))
-    previous = nil
-    requestRender()
-  }
-
-  /// 前回の画面を忘れて、すべて描き直す（端末側で画面が汚れたとき）。
-  func repaint() {
-    previous = nil
     requestRender()
   }
 
@@ -139,21 +120,29 @@ final class App {
 
   private func render() {
     scheduled = false
-    if done || terminal.suspended || root == nil {
+    if done || root == nil {
       return
     }
-    let screen = Screen(terminal.width, terminal.height)
+    Theme.active = Appearance.current.window
+    let screen = Screen(host.width, host.height, sizer: host.sizer)
     screen.fill(0, 0, screen.width, screen.height, Style())
     root.draw(screen)
     if !modals.isEmpty {
       // 画像はダイアログより上に出てしまうので、ダイアログを開いている間は出さない。
-      screen.image = nil
+      screen.removeImages()
     }
+    // ダイアログは、透明な画面に描いて重ねる（GUI 版では、下の窓の文字の大きさが違っても上に出る）。
     for modal in modals {
-      screen.cursor = nil
-      modal.draw(screen)
+      screen.removeCursors()
+      screen.layer(0, 0, screen.width, screen.height, theme: .window, clear: true) { modal.draw($0) }
     }
-    terminal.write(screen.diff(previous))
-    previous = screen
+    // ステータスバーは、ダイアログを含めていちばん上の、下から2行目の右に出す。
+    if let status {
+      screen.layer(0, 0, screen.width, screen.height, theme: .window, clear: true) { s in
+        let text = " \(truncate(status, max(0, s.width - 4))) "
+        s.text(max(0, s.width - 1 - textWidth(text)), s.height - 2, text, Style(fg: Palette.statusbar, bg: Palette.surfaceHigh))
+      }
+    }
+    host.present(screen)
   }
 }

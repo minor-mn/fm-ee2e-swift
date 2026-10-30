@@ -1,0 +1,642 @@
+// fm-ee2e の画面に出す文言。~/.config/fm-ee2e/languages/ja.json5 にコピーして使う。
+// {name} の形のところには、名前や件数などが入る。配列は、改行でつないだ1つの文言になる。
+{
+  // 設定ファイル（config.json5）の誤り
+  app_config: {
+    not_json: "JSON として読めません。",
+    not_json_detail: "（{detail}）",
+    root_not_object: "{ \"right_tabs\": … } の形で書いてください。",
+    unknown_root_key: "「{key}」は使えません。{names} のどれかです。",
+    language_invalid: "language には、languages フォルダーにあるファイルの名前を、.json5 を除いて書いてください（ja・en など）。",
+    right_tabs_not_object: "right_tabs には、タブごとに true か false を書いてください。",
+    unknown_key: "{path} の「{name}」は使えません。{names} のどれかです。",
+    list_separator: "・",
+    right_tabs_not_bool: "right_tabs の「{key}」の値は true か false です。",
+    alpha_only_background: "{path} は「#RRGGBB」の形の色です（透明度は地の色だけに書けます）。",
+    font_family_invalid: "{path}.font.family には、フォントの名前か、名前を並べた [ … ] を書いてください。",
+    gradient_needs_from_to: "{path}.gradient には from と to の色を書いてください。",
+    image_path_missing: "{path}.image.path に画像のパスを書いてください。",
+    one_of: "{path} は {names} のどれかです。",
+    not_object: "{path} には { … } の形で項目を書いてください。",
+    not_bool: "{path} は true か false です。",
+    out_of_range: "{path} は {min}〜{max} の数です。",
+    not_color: "{path} は「#RRGGBB」か「#RRGGBBAA」の形の色です。",
+  },
+  // メイン画面
+  main_view: {
+    no_tab: {
+      title: "右の窓に出すタブがありません。",
+      hint: "~/.config/fm-ee2e/config.json5 の right_tabs で true にしてください。",
+    },
+    git_checking: "確認中…",
+    choose_left_ssh: "左の SSH で接続先を選んでください。",
+    terminal_too_small: "端末が小さすぎます",
+    // マークの行の、窓の名前
+    side: {
+      left: "左",
+      right: "右",
+    },
+    // 下のキーの案内
+    keys: {
+      mark: "マーク",
+      tab: "右タブ切替",
+      left_tab: "左タブ切替",
+      switch_pane: "タブ移動",
+    },
+    // C・M で選んだときの、キーの案内の右端
+    clip: {
+      move: "移動",
+      copy: "コピー",
+      note: "{action} {count}項目  P 貼り付け  Esc 取り消し",
+    },
+    // H / ? のヘルプ
+    help: {
+      title: "キー操作",
+      text: [
+        "↑↓ PgUp PgDn Home End  カーソル移動",
+        "",
+        "← →            左右の窓を切り替え",
+        "Tab            右の窓を Google Drive / git status / SSH / iCloud Drive / ローカル に切り替え",
+        "               (SSH はつなぐ前は ~/.ssh/config の Host の一覧。Enter でつなぐ)",
+        "Shift+Tab      左の窓をローカル / SSH に切り替え",
+        "               (左が SSH のときの右の SSH は、左の接続先から、その ~/.ssh/config でつなぐ)",
+        "               (左が SSH のときは、右はローカル / git status / SSH だけ。",
+        "                git status は接続先のリポジトリ。右がローカルなら G は SCP 転送)",
+        "SSH            接続先のファイルを一覧・マーク・コピー・移動・削除",
+        "               G/F12: ローカルとの転送  E/F8: 接続先で編集",
+        "               S: 接続先でコマンドを実行",
+        "Enter          フォルダーなら移動",
+        "               .zip .tar.gz .tar.xz は中をフォルダーのように表示 (読むだけ)",
+        "               Driveのファイルは一時フォルダーに復号",
+        "               SSH のファイルは接続先の $EDITOR (未設定・空ならvim) で編集",
+        "               (SSH の圧縮ファイルは、接続先の tar・bsdtar・unzip で中を表示)",
+        "               実行ファイルは引数を入れて実行",
+        "               割り当てのあるファイルはopen",
+        "               割り当てのないファイルはエディタ",
+        "BS             親フォルダーへ",
+        "Space          マーク / 反転",
+        "*              開いているフォルダーのマークを全部反転",
+        "C / M          コピー / 移動",
+        "P              開いているフォルダーに貼り付け",
+        "G              転送 (左→右: アップロード、右→左: ダウンロード)",
+        "               (右が SSH のときは F12 と同じく SCP 転送、同名は小窓で確認。",
+        "                左も SSH なら、左の接続先で scp を実行して左右の接続先の間で送る)",
+        "               (右が iCloud Drive・ローカルのときはコピー。同名は小窓で確認)",
+        "               (右が git status のときは Git コマンド。左で押すと左のファイルに",
+        "                git add / restore / rm を、ファイルの状態に合わせて出す)",
+        "               カーソルとマークの候補が複数ならマークだけ、1件ならカーソル",
+        "D / Del        削除 (ゴミ箱へ移動。SSH は rm で削除)",
+        "A              権限変更",
+        "S              シェル (コマンドを入れて枠の中で実行。終わったら Enter で戻る)",
+        "E              エディタ ($EDITORがなければvim固定)",
+        "R              名前の変更",
+        "K              mkdir (空のフォルダーを作る)",
+        "T              touch (空のファイルを作る)",
+        "Z              圧縮 (zip / tar.gz / tar.xz をカレントに作る。",
+        "               SSH は接続先の zip・tar・gzip・xz で作れる形式だけ)",
+        "U              カーソルの .zip .tar.gz .tar.xz をカレントに展開",
+        "               (SSH は接続先の tar・bsdtar・unzip で。なければ展開できない)",
+        "Ctrl+L         ディレクトリへ移動",
+        "~              ホームへ移動",
+        ".              隠しファイルを表示",
+        "V              画像・動画のプレビューを反対側の窓に出す (on・off。SSH は画像だけ)",
+        "O              SSH は切断",
+        "L              再読み込み",
+        "H / ?          このヘルプを表示",
+        "Esc            C・M で選んだのを取り消し",
+      ],
+    },
+  },
+  // 起動
+  run_app: {
+    config_unreadable: "~/.config/fm-ee2e/config.json5 を読み込めません。\n{error}",
+    font_separator: "、",
+    missing_fonts: "フォント {fonts} が見つからないので、SF Mono にしました。",
+  },
+  // マークの行
+  status_bars: {
+    marks: "{side}: {count}項目マーク（ファイル計 {size}）",
+    marks_elsewhere: "うち開いていないフォルダーに {count}項目",
+  },
+  // 画像・動画のプレビュー
+  preview_overlay: {
+    unavailable: "プレビューできません",
+    loading: "読み込み中…",
+  },
+  // GUI 版
+  gui_app: {
+    config_reload_failed: "~/.config/fm-ee2e/config.json5 を読み込めません。今の設定のままです。\n{error}",
+    // メニュー
+    menu: {
+      quit: "fm-ee2e-swift を終了",
+      edit: "編集",
+      copy: "コピー",
+      paste: "ペースト",
+      select_all: "すべてを選択",
+      view: "表示",
+      zoom_in: "拡大",
+      zoom_out: "縮小",
+      zoom_reset: "元の大きさ",
+      window: "ウインドウ",
+      minimize: "しまう",
+      close: "閉じる",
+    },
+  },
+  // 外部コマンド
+  process: {
+    failed: "{command} が失敗しました",
+    exit_status: "[終了コード {code}]",
+    cannot_run: "{executable} を実行できません: {error}",
+  },
+  // シェルの端末
+  shell_session: {
+    already_started: "このセッションは開始済みです。",
+    start_failed: "端末を開始できませんでした。",
+  },
+  // シェルの枠
+  terminal_modal: {
+    // キーの案内
+    keys: {
+      interrupt: "中断",
+      scroll_back: "さかのぼる",
+      back: "戻る",
+    },
+  },
+  // ローカルのファイル
+  local_files: {
+    trash_failed: "ゴミ箱に移動できません",
+  },
+  // 圧縮ファイル
+  archive: {
+    extract_failed: "取り出せません",
+  },
+
+  // 転送（Google Drive・iCloud Drive・ローカル・SSH）
+  transfer: {
+    // Google Drive
+    drive_unavailable: "Google Driveを使えません。",
+    drive_loading: "Google Driveのフォルダーを読み込み中です。",
+    in_progress: "{title}中…",
+    in_progress_item: "{title}中… {name}",
+    upload: "アップロード",
+    drive_upload_confirm: "{label}を暗号化して Google Drive の {location} にアップロードします。",
+    download: "ダウンロード",
+    drive_download_confirm: "{label}を復号して {dir} にダウンロードします。",
+    in_progress_count: "{title}中（{index}/{total}）{name}",
+    // iCloud Drive
+    icloud_unavailable: "iCloud Driveは使えません。",
+    icloud_loading: "iCloud Driveのフォルダーを読み込み中です。",
+    icloud_upload_confirm: "{label}を {location} にアップロードします。",
+    icloud_download_confirm: "{label}を {dir} にダウンロードします。",
+    // ローカル同士
+    copy: "コピー",
+    copy_confirm: "{label}を {dir} にコピーします。",
+    // SSH（scp）
+    ssh_not_selected: "SSH の接続先を選んでください。",
+    scp_confirm: "{label} を{title}します",
+    created_during_transfer: "転送中に同名の項目が作られました。再実行して上書きを選んでください。",
+    replace_failed: "置き換えに失敗しました。元のデータは {previous} に残しています。",
+    staging_remove_failed: "一時フォルダー {staging} を削除できません: {error}",
+    copy_right: "右へコピー",
+    copy_left: "左へコピー",
+  },
+  // ダイアログ共通
+  dialogs: {
+    hint: {
+      close: "閉じる",
+      complete: "補完",
+      history: "履歴",
+      decide: "決定",
+      move: "移動",
+      toggle: "切替",
+      apply: "適用",
+      select: "選択",
+      page: "ページ",
+      abort: "中断",
+    },
+    cancel: "キャンセル",
+    // 入力の候補が収まらないとき
+    more_candidates: "…ほか{count}件",
+    // 実行ファイルの引数
+    exec: {
+      title: "実行",
+      arguments: "引数",
+    },
+    // パーミッション
+    mode: {
+      title: "パーミッション",
+      owner: "所有者",
+      group: "グループ",
+      other: "その他",
+      special: "特殊",
+      read: "読み",
+      write: "書き",
+      execute: "実行",
+    },
+    progress_title: "お待ちください",
+    error_title: "エラー",
+    yes: "はい",
+  },
+  // 圧縮・展開
+  archive_command: {
+    unavailable: "圧縮できません。",
+    checking: "確認中…",
+    format_title: "圧縮の形式",
+    compress_title: "圧縮",
+    compress_message: "{count}項目を {place} に圧縮します。ファイル名",
+    compressing: "圧縮中…",
+    ssh_unavailable: "{host} には zip も tar（gzip・xz）もないので、圧縮できません。",
+    reading: "「{name}」を読み込み中…",
+    extract_title: "展開",
+    extract_confirm: "「{name}」を {place} に展開します。",
+    extract_yes: "展開",
+    clash_title: "同じ名前があります（{names}）",
+    clash_more: " ほか",
+    name_separator: "、",
+    overwrite: "上書きする",
+    keep_existing: "今あるファイルは残す",
+    extracting: "「{name}」を展開中…",
+  },
+  // 削除
+  delete: {
+    // ゴミ箱に移動（ローカル・iCloud Drive）
+    trash_title: "ゴミ箱に移動",
+    trash_confirm: "{label}をゴミ箱に移動します。",
+    trash_yes: "移動する",
+    trash_progress: "移動中…",
+    // SSH
+    ssh_title: "削除",
+    ssh_confirm: [
+      "{label}を {host} から削除します。",
+      "ゴミ箱はないので、元に戻せません。",
+    ],
+    ssh_yes: "削除する",
+    ssh_progress: "削除中…",
+  },
+  // 貼り付け
+  paste: {
+    use_transfer: "ローカルとGoogle Drive・SSH の間は G で転送してください。",
+    moving: "移動中…",
+    copying: "コピー中…",
+    cannot_move_into_itself: "{name}: フォルダーをその中には移動できません。",
+    cannot_copy_into_itself: "{name}: フォルダーをその中にはコピーできません。",
+    other_connection: "コピー・移動した接続とは別の接続です。",
+  },
+  // 同名の確認・名前の入力
+  prompts: {
+    conflict: {
+      title: "同じ名前のファイル・フォルダーがあります",
+      apply_to_rest: "残りすべてに適用",
+      overwrite: "上書き",
+      rename: "別名で保存",
+      skip: "スキップ",
+      apply_to_all: "すべてに適用",
+      cancel: "中止",
+    },
+    name: {
+      slash: "「/」は使えません。",
+      exists: "同じ名前があります。",
+    },
+  },
+  // Google Drive の鍵の用意
+  drive_setup: {
+    title: "鍵を用意する",
+    generate_title: "新しい鍵を生成",
+    paste_title: "既存の鍵をペースト",
+    save_failed: "保存できませんでした: {error}",
+    generate_confirm: [
+      "新しい鍵を {key_file} に保存します。",
+      "鍵を失うと暗号化したファイルは復号できません。バックアップを別に保管してください。",
+    ],
+    generate_yes: "生成する",
+    paste_message: "1行目が {header}、2行目が鍵のBase64のテキストを貼り付けてください。",
+  },
+  // エディタで開く
+  edit: {
+    is_folder: "フォルダーはエディタで開けません。",
+    missing: "ファイルがありません（消したファイルです）。",
+  },
+  // ディレクトリへ移動
+  navigation: {
+    go_to_title: "ディレクトリへ移動",
+    not_found: "ディレクトリがありません: {path}",
+    local_prompt: "パス（~ はホーム）",
+    ssh_prompt: "接続先のパス（~ はホーム）",
+  },
+  // コマンド共通
+  command: {
+    select_one: "1項目だけを選んでください。",
+    quoted_name: "「{name}」",
+    items: "{count}項目",
+  },
+  // 新しいフォルダー
+  mkdir: {
+    title: "新しいフォルダー",
+    message: "フォルダー名",
+  },
+  // 名前を変更
+  rename: {
+    title: "名前を変更",
+  },
+  // シェル
+  shell: {
+    title: "シェル",
+  },
+  // SSH の切断
+  sign_out: {
+    title: "切断",
+    confirm: "{host} との接続を切ります。",
+  },
+  // 空のファイルを作る
+  touch: {
+    message: "ファイル名",
+  },
+
+  drive_edit: {
+    // Google Drive 上のファイルを編集して保存するとき、元が変わっていたら
+    changed: {
+      title: "Google Drive のファイルが変わっています",
+      overwrite: "上書きする",
+      save_as: "別の名前で保存する",
+      dont_save: "保存しない",
+      note_deleted: "「{name}」は開いたあとに Google Drive から消えています。",
+      note_modified: "「{name}」は開いたあとに Google Drive で変わっています。",
+    },
+    // 編集・保存の進み具合とエラー
+    encrypting: "「{name}」を暗号化中…",
+    cannot_open: "{path} を開けません。",
+    decrypting: "「{name}」を復号中…",
+    save_failed_kept: [
+      "保存できませんでした。編集した内容は次に起動したときに保存できます。",
+      "{message}",
+    ],
+    // 前に保存できなかった編集を、起動時に聞く
+    recover: {
+      title: "保存されていない編集があります",
+      save: "Google Drive に保存する",
+      discard: "捨てる",
+      note: "「{name}」を編集したまま、Google Drive に保存されていません。",
+    },
+    save_failed: [
+      "保存できませんでした。",
+      "{message}",
+    ],
+  },
+  drive_pane: {
+    // Google Drive のパネルを使えないときの表示
+    placeholder: {
+      checking: "確認中…",
+      not_installed: "Google ドライブ for デスクトップをインストールしてください",
+      no_key: "鍵ファイルがありません（{key_file}）。",
+      no_key_hint: "Enter: 鍵を用意する（新しく生成・既存の鍵をペースト）",
+      bad_key: "鍵ファイルを読み込めません。",
+      retry_hint: "直したら L で確かめ直します。",
+      unavailable: "Google Driveを使えません。",
+    },
+    // アップロード・ダウンロード
+    uploading: "Google Drive にアップロード中…",
+    uploading_remaining: "Google Drive にアップロード中…（残り {count} 件）",
+    cannot_move: "{path} に移せません: {reason}",
+    decrypting: "「{name}」を復号中…",
+    cannot_make_temp: "一時フォルダーを作れません: {reason}",
+  },
+  icloud_pane: {
+    // iCloud Drive のパネルを使えないときの表示
+    placeholder: {
+      checking: "確認中…",
+      not_available: "iCloud Driveは使えません。",
+      not_available_hint: "この Mac のシステム設定で iCloud Drive をオンにしてください。",
+      unreadable: "iCloud Driveのフォルダーを読めません。",
+      retry_hint: "直したら L で確かめ直します。",
+    },
+  },
+  local_pane: {
+    // 圧縮ファイルの中
+    extracting: "「{name}」を取り出し中…",
+    read_only_archive: "圧縮ファイルの中では使えません（読むだけです）。",
+  },
+  pane: {
+    // 一覧の読み込み中・失敗・空
+    loading: "読み込み中…",
+    load_failed: "読み込めません: {message}",
+    reload_hint: "L: 再読み込み",
+    empty_folder: "このフォルダーは空です",
+  },
+  ssh_pane: {
+    // SSH のパネルに何も出せないときの表示
+    placeholder: {
+      choose_host: "左の SSH で接続先を選んでください。",
+      no_remote_config: "{host} に ~/.ssh/config がありません。",
+      no_config: "SSHは使えません。(~/.ssh/configを配置すれば使えます)",
+    },
+    disconnected: "{host} との接続が切れました。もう一度選んでください。",
+    // 圧縮ファイル・ダウンロード
+    read_only_archive: "圧縮ファイルの中では使えません（読むだけです）。",
+    downloading: "「{name}」をダウンロード中…",
+    download_cancelled: "「{name}」のダウンロードをやめました。",
+    opening_archive: "「{name}」を読み込み中…",
+    extracting: "「{name}」を取り出し中…",
+    cannot_make_temp: "一時フォルダーを作れません: {reason}",
+    // 接続
+    connecting: "接続中…",
+  },
+  ssh: {
+    // ssh・scp のエラー
+    exit_code: "終了コード {code}",
+    cannot_create_file: "ファイルを作れません",
+    newline_in_name: "改行を含む名前は扱えません。",
+  },
+  remote_archive: {
+    // 接続先の圧縮ファイル
+    no_unzip: "{host} に bsdtar も unzip もないので、zip を扱えません。",
+    no_tar: "{host} に tar がないので、tar.gz・tar.xz を扱えません。",
+    cannot_extract: "「{path}」は取り出せません。",
+  },
+  encrypted_format: {
+    // 暗号化ファイルを読めないとき
+    truncated_header: "ヘッダーが途中で切れています。",
+    unsupported_version: "未対応の形式の版です（{version}）。",
+    bad_chunk_size: "チャンク長が不正です（{size}）。",
+    truncated_data: "データが途中で切れています。",
+    tampered: "改ざん、破損、または途中で切れたデータです。",
+    not_encrypted: "このアプリで暗号化されたファイルではありません。",
+    wrong_key: "鍵が一致しません。別の鍵で暗号化されたファイルです。",
+  },
+  key_file: {
+    // 鍵ファイルを読めない・作れないとき
+    bad_format: "鍵の形式ではありません。1行目が {header} である必要があります。",
+    bad_base64: "鍵の2行目がBase64として読めません。",
+    bad_length: "鍵の長さが{expected}バイトではありません（{actual}バイト）。",
+    cannot_set_permission: "パーミッションを設定できません: {reason}",
+  },
+
+  git_commands: {
+    // 実行中の表示（{command} は git switch など）
+    running: "{command} 中…",
+    // リモートの紐付け先を選ぶ
+    remote: {
+      no_branch: "ブランチにいないので、リモートを紐付けられません。",
+      none_registered: "リモートが登録されていません。",
+      title: "「{branch}」の紐付け先",
+    },
+    // ブランチの切り替え・作成
+    branch: {
+      create: "新しいブランチを作る",
+      switch_title: "ブランチの切り替え",
+      switch_with_changes: [
+        "コミットしていない変更があります。変更は切り替え先に持っていきます。",
+        "切り替え先と重なるファイルがあると、git が止めます（変更は消えません）。",
+        "続けますか？",
+      ],
+      switch_yes: "切り替える",
+      new_name: "今の場所から作るブランチの名前",
+      name_required: "ブランチ名を入力してください。",
+      invalid_name: "「{name}」はブランチ名に使えません。",
+    },
+    // push 先（branch.<名前>.pushRemote）を選ぶ
+    push_remote: {
+      no_branch: "ブランチにいないので、push 先を設定できません。",
+      title: "「{branch}」の push 先",
+      note: [
+        "push 先の remote を別に用意する時だけ設定します。通常は不要です。",
+        "追加するには .git/config に次のように書き足します（名前と URL は自分のものに）。",
+        "[remote \"fork\"]",
+        "    url = https://github.com/you/repo.git",
+        "    fetch = +refs/heads/*:refs/remotes/fork/*",
+      ],
+    },
+    // 差分
+    no_diff: "差分はありません。",
+    // git commit
+    commit: {
+      marks_ignored: " (マークは無視されます)",
+      message: "コミットメッセージ",
+      message_required: "コミットメッセージを入力してください。",
+    },
+    // git push・pull
+    push: {
+      no_remote: "remoteを選択してください",
+    },
+    pull: {
+      with_changes: [
+        "コミットしていない変更があります。",
+        "pull で取り込む変更と重なると、コンフリクトするかもしれません（同じファイルなら止まります）。",
+        "続けますか？",
+      ],
+      yes: "続ける",
+    },
+    force_push: {
+      branch: "「{branch}」",
+      message: [
+        "リモートの{branch}ブランチを、手元の内容で上書きします。",
+        "リモートが、最後に取り込んだ（fetch した）ときから変わっていれば止まります。",
+      ],
+      yes: "上書きする",
+    },
+    // 対象の名前・数（{label} に入れる）
+    label: {
+      one: "「{path}」",
+      files: "{count}ファイル",
+      items: "{count}項目",
+    },
+    // git restore
+    restore: {
+      message: [
+        "{label}の、add していない変更を捨てて、add した状態（add していなければ最後のコミット）に戻します。",
+        "捨てた変更は取り戻せません。",
+      ],
+      yes: "捨てる",
+    },
+    // 左の窓の対象への Git コマンド
+    left: {
+      nothing: "git で扱うものがありません（変更がないか、.gitignore で除いています）。",
+      command_with_count: "{command} ({count}項目)",
+    },
+    // git rm
+    rm: {
+      message: [
+        "{label}を git の管理から外し、ファイルも消します（コミットした内容は git に残ります）。",
+        "コミットしていない変更があれば、git が止めます。",
+      ],
+      yes: "消す",
+    },
+    // git branch -m
+    rename: {
+      new_name: "ブランチの新しい名前",
+    },
+  },
+  log_view: {
+    // コミットの一覧の操作の案内
+    hints: {
+      move: "移動",
+      mark: "マーク",
+      open: "開く",
+      edit: "作者・メッセージを直す",
+      back: "戻る",
+    },
+    // 実行中の表示（{command} は git log など）
+    running: "{command} 中…",
+    // コミットの作者・メッセージの書き換え
+    edit: {
+      signed: "直近のコミット以外は書き換えられません（続けると署名が消えるコミットがあります）。",
+      required: "{what}を入力してください。",
+      no_angle_brackets: "{what}に < > は使えません。",
+      author_name: "作者の名前",
+      name: "名前",
+      author_email: "作者のメールアドレス",
+      email: "メールアドレス",
+      message: "コミットメッセージ",
+      message_required: "コミットメッセージを入力してください。",
+      rewrite_title: "コミットの書き換え",
+      pushed: [
+        "このコミットは push 済みです。書き換えると、リモートと食い違います。",
+        "リモートに反映するには、git push --force-with-lease が要ります。",
+      ],
+      later: "あとに続く{count}件のコミットも作り直します。",
+      continue: "続けますか？",
+      rewrite_yes: "書き換える",
+      rewriting: "コミットを書き換え中…",
+    },
+    // 一覧の見出し（{title} は git log  ブランチ名 など）
+    heading_count: "{title}  {count}件",
+    // 一覧が空のとき
+    empty: {
+      commits: "コミットはまだありません。",
+      file_commits: "このファイルのコミットはまだありません。",
+      files: "変わったファイルはありません。",
+    },
+    no_diff: "差分はありません。",
+  },
+  diff_view: {
+    // 差分の画面の操作の案内
+    hints: {
+      scroll: "スクロール",
+      next_prev: "次 / 前の変更",
+      files: "前後のファイル",
+      back: "戻る",
+    },
+    // 中身の差分を出せないとき
+    binary: "バイナリファイルのため、中身の差分は表示できません。",
+    empty_file: "空のファイルです。",
+    no_content_diff: "中身の差分はありません（権限の変更などだけです）。",
+    // 変更の固まりの区切り
+    hunk_from: "⋯ {line}行目から",
+  },
+  git: {
+    // コミットの作者の書き換え
+    rewrite: {
+      not_in_history: "今の位置の履歴にないコミットは書き換えられません。",
+      unreadable: "コミットを読めませんでした。",
+    },
+    // Git の窓の一覧
+    status: {
+      no_changes: "変更はありません",
+    },
+  },
+  git_pane: {
+    // Git の窓のタイトルと案内
+    loading: "Git 読み込み中…",
+    no_git: "接続先に git がありません。",
+    not_repository: "git 管理されていないフォルダーです。",
+  },
+}

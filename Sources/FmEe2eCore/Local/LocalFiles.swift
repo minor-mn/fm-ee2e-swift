@@ -221,6 +221,6 @@ func openFile(_ path: String) async throws {
 func moveToTrash(_ path: String) async throws {
   let result = try await runProcess("/usr/bin/trash", [p.absolute(path)])
   if result.exitCode != 0 {
-    throw FileSystemException("ゴミ箱に移動できません", path)
+    throw FileSystemException(tr("local_files.trash_failed"), path)
   }
 }

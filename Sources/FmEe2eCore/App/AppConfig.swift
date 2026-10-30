@@ -1,26 +1,37 @@
-import Foundation
+import AppKit
 
-/// 設定ファイル（~/.config/fm-ee2e/config.yml）。
+/// 設定ファイル（~/.config/fm-ee2e/config.json5）。
 ///
-/// ```yaml
-/// right_tabs:
-///   google_drive: on
-///   git: on
-///   ssh: on
-///   icloud: on
-///   local: on
+/// ```json
+/// {
+///   "right_tabs": {
+///     "google_drive": true,
+///     "git": true,
+///     "ssh": true,
+///     "icloud": true,
+///     "local": true
+///   }
+/// }
 /// ```
 ///
-/// ファイルや項目がなければ on。
+/// ファイルや項目がなければ true。コメント（// と /* */）と末尾のカンマも書ける（JSON5）。
 struct AppConfig {
-  init(rightTabs: [RightMode] = RightMode.allCases) {
+  init(language: String = "ja", rightTabs: [RightMode] = RightMode.allCases, appearance: Appearance = .standard) {
+    self.language = language
     self.rightTabs = rightTabs
+    self.appearance = appearance
   }
+
+  /// 画面の言葉（~/.config/fm-ee2e/languages/<language>.json5 を読む。ファイルがあれば、どの名前でもよい）。
+  let language: String
 
   /// 右の窓に出すタブ（Tab で切り替える順）。
   let rightTabs: [RightMode]
 
-  static var file: String { p.join(homeDir, ".config", "fm-ee2e", "config.yml") }
+  /// 見た目（appearance）。書き方は [parseAppearance]。
+  let appearance: Appearance
+
+  static var file: String { p.join(homeDir, ".config", "fm-ee2e", "config.json5") }
 
   /// 設定ファイルでのタブの名前（書く順）。
   private static let tabNames: [(String, RightMode)] = [
@@ -36,41 +47,388 @@ struct AppConfig {
     guard let data = FileManager.default.contents(atPath: file) else {
       return AppConfig()
     }
-    guard let yaml = try parseYaml(String(decoding: data, as: UTF8.self)) else {
+    return try parse(data)
+  }
+
+  /// 設定ファイルの中身 [data] を読む。空なら既定の設定。
+  static func parse(_ data: Data) throws -> AppConfig {
+    if String(decoding: data, as: UTF8.self).allSatisfy(\.isWhitespace) {
       return AppConfig()
     }
-    guard case .map(let root) = yaml else {
-      throw ConfigFormatError("right_tabs などの項目を書いてください。")
+    let json: Any
+    do {
+      json = try JSONSerialization.jsonObject(with: data, options: [.json5Allowed])
+    } catch {
+      let detail = (error as NSError).userInfo[NSDebugDescriptionErrorKey] as? String
+      throw ConfigFormatError(tr("app_config.not_json") + (detail.map { tr("app_config.not_json_detail", ["detail": $0]) } ?? ""))
     }
-    guard let tabs = root.first(where: { $0.0 == "right_tabs" })?.1, tabs != .null else {
-      return AppConfig()
+    guard let root = json as? [String: Any] else {
+      throw ConfigFormatError(tr("app_config.root_not_object"))
     }
-    guard case .map(let entries) = tabs else {
-      throw ConfigFormatError("right_tabs には、タブごとに on か off を書いてください。")
+    let rootKeys = ["language", "right_tabs", "appearance"]
+    for key in root.keys where !rootKeys.contains(key) {
+      throw ConfigFormatError(tr("app_config.unknown_root_key", ["key": key, "names": list(rootKeys)]))
+    }
+    var language = "ja"
+    if let value = root["language"], !(value is NSNull) {
+      // ファイルの名前にするので、ほかのフォルダーを指す「/」や「..」は書けない。
+      guard let name = value as? String, name.range(of: #"^[A-Za-z0-9_-]+$"#, options: .regularExpression) != nil else {
+        throw ConfigFormatError(tr("app_config.language_invalid"))
+      }
+      language = name
+    }
+    let appearance = try parseAppearance(root["appearance"])
+    guard let tabs = root["right_tabs"], !(tabs is NSNull) else {
+      return AppConfig(language: language, appearance: appearance)
+    }
+    guard let entries = tabs as? [String: Any] else {
+      throw ConfigFormatError(tr("app_config.right_tabs_not_object"))
     }
     var off = Set<RightMode>()
     for (key, value) in entries {
       guard let mode = tabNames.first(where: { $0.0 == key })?.1 else {
-        throw ConfigFormatError("right_tabs の「\(key)」は使えません。\(tabNames.map(\.0).joined(separator: "・")) のどれかです。")
+        throw unknownKey("right_tabs", key, tabNames.map(\.0))
       }
-      if !(try isOn(value)) {
+      guard let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else {
+        throw ConfigFormatError(tr("app_config.right_tabs_not_bool", ["key": key]))
+      }
+      if !number.boolValue {
         off.insert(mode)
       }
     }
-    return AppConfig(rightTabs: RightMode.allCases.filter { !off.contains($0) })
+    return AppConfig(language: language, rightTabs: RightMode.allCases.filter { !off.contains($0) }, appearance: appearance)
   }
 
-  /// on か off か。YAML 1.2 では on・off は文字列なので、true・false と合わせて受け付ける。
-  private static func isOn(_ value: YamlValue) throws -> Bool {
-    do {
-      switch value {
-      case .scalar("true"), .scalar("True"), .scalar("TRUE"), .scalar("on"): return true
-      case .scalar("false"), .scalar("False"), .scalar("FALSE"), .scalar("off"): return false
-      case .scalar(let s), .quoted(let s): throw ConfigFormatError("right_tabs の値は on か off です（「\(s)」）。")
-      case .null: throw ConfigFormatError("right_tabs の値は on か off です（「null」）。")
-      case .map: throw ConfigFormatError("right_tabs の値は on か off です。")
+  /// appearance を読む。
+  ///
+  /// - window: 窓全体（opacity・blur と、[elementNames] の要素）。
+  /// - default: 書いていないタブに使う（[elementNames] の要素）。
+  /// - local・ssh・git・icloud・google_drive: タブごと。書いていない項目は default を、default にもなければ window を引き継ぐ。
+  ///   ただし background は window から引き継がない（塗らなければ、下の窓全体の背景が見える）。
+  /// 項目に null を書くと、引き継いだ値を消す。
+  static func parseAppearance(_ value: Any?) throws -> Appearance {
+    guard let value, !(value is NSNull) else {
+      return .standard
+    }
+    let blocks = try dictionary(value, "appearance")
+    for key in blocks.keys where ThemeKey(rawValue: key) == nil {
+      throw unknownKey("appearance", key, ThemeKey.allCases.map(\.rawValue))
+    }
+    func block(_ key: ThemeKey) throws -> [String: Any] {
+      guard let value = blocks[key.rawValue], !(value is NSNull) else {
+        return [:]
+      }
+      let block = try dictionary(value, "appearance.\(key.rawValue)")
+      var allowed = elementTree
+      if key == .window {
+        allowed["opacity"] = true
+        allowed["blur"] = true
+      }
+      if key == .drive || key == .icloud {
+        allowed["show_used"] = true
+      }
+      try checkKeys(block, allowed, "appearance.\(key.rawValue)")
+      return block
+    }
+    let windowBlock = try block(.window)
+    var missingFonts: [String] = []
+    var appearance = Appearance(window: try theme(windowBlock, "appearance.window", base: Appearance.standard.window, &missingFonts))
+    // 窓全体の画面で塗らずに背景を見せる地の色は、窓全体の背景の色。
+    appearance.window.colors.background = appearance.window.background?.color?.rgb ?? ThemeColors().background
+    if let opacity = windowBlock["opacity"], !(opacity is NSNull) {
+      appearance.opacity = try number(opacity, "appearance.window.opacity", 0...1)
+    }
+    if let blur = windowBlock["blur"], !(blur is NSNull) {
+      appearance.blur = try bool(blur, "appearance.window.blur")
+    }
+    // タブは、窓全体の色・文字を土台に、default、タブの順に重ねる（背景は窓全体から引き継がない）。
+    var base = appearance.window
+    base.background = nil
+    let defaults = try block(.defaults)
+    for key in ThemeKey.allCases where key != .window {
+      let merged = key == .defaults ? defaults : merge(defaults, try block(key))
+      var tab = try theme(merged, "appearance.\(key.rawValue)", base: base, &missingFonts)
+      if let value = merged["show_used"], !(value is NSNull) {
+        tab.showUsed = try bool(value, "appearance.\(key.rawValue).show_used")
+      }
+      // 枠の中の地の色は、タブの背景の色。なければ窓全体の背景の色のまま。
+      tab.colors.background = tab.background?.color?.rgb ?? appearance.window.colors.background
+      appearance.tabs[key] = tab
+    }
+    appearance.missingFonts = missingFonts
+    return appearance
+  }
+
+  /// [over] の項目で [base] を上書きする。対応付けは項目ごとに重ね、null は項目を消す。
+  static func merge(_ base: [String: Any], _ over: [String: Any]) -> [String: Any] {
+    var result = base
+    for (key, value) in over {
+      if value is NSNull {
+        result.removeValue(forKey: key)
+      } else if let inner = value as? [String: Any], let old = result[key] as? [String: Any] {
+        result[key] = merge(old, inner)
+      } else {
+        result[key] = value
       }
     }
+    return result
+  }
+
+  /// 要素ごとの色の書き場所（ブロックの中のパス）と、それを入れる [ThemeColors] の色。
+  /// 地の色（パスに background を含む）は、#RRGGBBAA で透明度も書ける（GUI 版だけ効く）。
+  private static let colorElements: [(path: [String], apply: (inout ThemeColors, Rgb) -> Void)] = [
+    (["text", "color"], { $0.text = $1 }),
+    (["subtext", "color"], { $0.muted = $1 }),
+    (["location", "color"], { $0.location = $1 }),
+    (["statusbar", "color"], { $0.statusbar = $1 }),
+    (["header", "background", "color"], { $0.header = $1 }),
+    (["border", "color"], { $0.outline = $1 }),
+    (["highlight", "color"], { $0.lime = $1 }),
+    (["error", "color"], { $0.error = $1 }),
+    (["accent", "color"], { $0.accent = $1 }),
+    (["cursor", "background", "color"], { $0.selection = $1 }),
+    (["panel", "background", "color"], { $0.surface = $1 }),
+    (["dialog", "background", "color"], { $0.surfaceHigh = $1 }),
+    (["files", "directory", "color"], { $0.directory = $1 }),
+    (["files", "executable", "color"], { $0.executable = $1 }),
+    (["files", "hidden", "color"], { $0.hidden = $1 }),
+    (["files", "marked", "color"], { $0.marked = $1 }),
+    (["files", "symlink", "color"], { $0.symlink = $1 }),
+    (["diff", "added", "color"], { $0.diffAdded = $1 }),
+    (["diff", "added", "background", "color"], { $0.addedLine = $1 }),
+    (["diff", "removed", "color"], { $0.diffRemoved = $1 }),
+    (["diff", "removed", "background", "color"], { $0.removedLine = $1 }),
+  ]
+    + gitStatusKeys.map { key in (["status", key, "color"], { $0.gitStatus[key] = $1 }) }
+    + gitSectionKeys.map { key in (["sections", key, "color"], { $0.gitSectionColor[key] = $1 }) }
+
+  /// git status の、見た目を決められるブロックの見出し。
+  static let gitSectionKeys = ["staged", "unmerged", "not_staged", "untracked"]
+
+  /// git status の右の列の、色を決められる変更の種類。conflict は競合（unmerged）のすべて。
+  static let gitStatusKeys = ["modified", "new_file", "deleted", "renamed", "copied", "type", "conflict"]
+
+  /// ブロックに書ける項目の木（葉は true）。background と font は中身を別に確かめる。
+  private static var elementTree: [String: Any] {
+    var tree: [String: Any] = ["background": true, "font": true]
+    func add(_ path: ArraySlice<String>, _ node: inout [String: Any]) {
+      guard let head = path.first else { return }
+      if path.count == 1 {
+        node[head] = true
+        return
+      }
+      var child = node[head] as? [String: Any] ?? [:]
+      add(path.dropFirst(), &child)
+      node[head] = child
+    }
+    for (path, _) in colorElements {
+      add(path[...], &tree)
+    }
+    for key in gitSectionKeys {
+      add(["sections", key, "bold"], &tree)
+      add(["sections", key, "underline"], &tree)
+    }
+    return tree
+  }
+
+  /// [block] に、[tree] にない項目がないか確かめる。
+  private static func checkKeys(_ block: [String: Any], _ tree: [String: Any], _ path: String) throws {
+    for (name, value) in block {
+      guard let node = tree[name] else {
+        throw unknownKey(path, name, tree.keys.sorted())
+      }
+      if let children = node as? [String: Any], !(value is NSNull) {
+        try checkKeys(try dictionary(value, "\(path).\(name)"), children, "\(path).\(name)")
+      }
+    }
+  }
+
+  /// [block] を [base] に重ねる。
+  /// どれも見つからなかったフォントの候補は [missingFonts] に足す（同じものは1度だけ）。
+  private static func theme(_ block: [String: Any], _ path: String, base: Theme, _ missingFonts: inout [String]) throws -> Theme {
+    var theme = base
+    for (elementPath, apply) in colorElements {
+      var value: Any? = block
+      for name in elementPath {
+        value = (value as? [String: Any])?[name]
+      }
+      guard let value, !(value is NSNull) else {
+        continue
+      }
+      let where_ = ([path] + elementPath).joined(separator: ".")
+      let color = try rgba(value, where_)
+      if color.alpha < 1 && !elementPath.contains("background") {
+        throw ConfigFormatError(tr("app_config.alpha_only_background", ["path": where_]))
+      }
+      apply(&theme.colors, color.rgb)
+      if color.alpha < 1 {
+        theme.colors.alphas[color.rgb.value] = color.alpha
+      } else {
+        theme.colors.alphas.removeValue(forKey: color.rgb.value)
+      }
+    }
+    // git status の見出しの太字・下線（色は colorElements で読む）。
+    for key in gitSectionKeys {
+      let section = ((block["sections"] as? [String: Any])?[key] as? [String: Any]) ?? [:]
+      if let value = section["bold"], !(value is NSNull) {
+        theme.colors.gitSectionBold[key] = try bool(value, "\(path).sections.\(key).bold")
+      }
+      if let value = section["underline"], !(value is NSNull) {
+        theme.colors.gitSectionUnderline[key] = try bool(value, "\(path).sections.\(key).underline")
+      }
+    }
+    if let value = block["font"], !(value is NSNull) {
+      let font = try dictionary(value, "\(path).font")
+      for name in font.keys where !["family", "size"].contains(name) {
+        throw unknownKey("\(path).font", name, ["family", "size"])
+      }
+      // 候補を上から探し、入っている最初のフォントを使う。どれもなければ SF Mono。
+      if let family = font["family"], !(family is NSNull) {
+        let names: [String]
+        if let name = family as? String {
+          names = [name]
+        } else if let list = family as? [Any], !list.isEmpty, list.allSatisfy({ $0 is String }) {
+          names = list as! [String]
+        } else {
+          throw ConfigFormatError(tr("app_config.font_family_invalid", ["path": path]))
+        }
+        theme.font.family = names.first { NSFont(name: $0, size: 12) != nil }
+        let joined = list(names)
+        if theme.font.family == nil && !missingFonts.contains(joined) {
+          missingFonts.append(joined)
+        }
+      }
+      if let size = font["size"], !(size is NSNull) {
+        theme.font.size = try number(size, "\(path).font.size", 6...72)
+      }
+    }
+    if let value = block["background"], !(value is NSNull) {
+      theme.background = try background(try dictionary(value, "\(path).background"), "\(path).background", base: base.background)
+    } else if block.keys.contains("background") {
+      theme.background = nil
+    }
+    return theme
+  }
+
+  private static func background(_ block: [String: Any], _ path: String, base: Background?) throws -> Background {
+    for name in block.keys where !["color", "gradient", "image"].contains(name) {
+      throw unknownKey(path, name, ["color", "gradient", "image"])
+    }
+    var result = base ?? Background()
+    if let value = block["color"] {
+      result.color = value is NSNull ? nil : try rgba(value, "\(path).color")
+    }
+    if let value = block["gradient"] {
+      if value is NSNull {
+        result.gradient = nil
+      } else {
+        let gradient = try dictionary(value, "\(path).gradient")
+        for name in gradient.keys where !["from", "to", "angle"].contains(name) {
+          throw unknownKey("\(path).gradient", name, ["from", "to", "angle"])
+        }
+        guard let from = gradient["from"], let to = gradient["to"] else {
+          throw ConfigFormatError(tr("app_config.gradient_needs_from_to", ["path": path]))
+        }
+        result.gradient = Background.Gradient(
+          from: try rgba(from, "\(path).gradient.from"),
+          to: try rgba(to, "\(path).gradient.to"),
+          angle: try gradient["angle"].map { try number($0, "\(path).gradient.angle", -360...360) } ?? 90
+        )
+      }
+    }
+    if let value = block["image"] {
+      if value is NSNull {
+        result.image = nil
+      } else {
+        let image = try dictionary(value, "\(path).image")
+        let names = ["path", "mode", "opacity", "align", "max_width", "max_height"]
+        for name in image.keys where !names.contains(name) {
+          throw unknownKey("\(path).image", name, names)
+        }
+        guard let file = image["path"] as? String, !file.isEmpty else {
+          throw ConfigFormatError(tr("app_config.image_path_missing", ["path": path]))
+        }
+        var mode = ImageMode.fill
+        if let value = image["mode"] {
+          guard let name = value as? String, let found = ImageMode(rawValue: name) else {
+            throw ConfigFormatError(
+              tr("app_config.one_of", ["path": "\(path).image.mode", "names": list(ImageMode.allCases.map(\.rawValue))])
+            )
+          }
+          mode = found
+        }
+        var align = ImageAlign.center
+        if let value = image["align"] {
+          guard let name = value as? String, let found = ImageAlign(rawValue: name) else {
+            throw ConfigFormatError(
+              tr("app_config.one_of", ["path": "\(path).image.align", "names": list(ImageAlign.allCases.map(\.rawValue))])
+            )
+          }
+          align = found
+        }
+        result.image = Background.BackgroundImage(
+          path: (file as NSString).expandingTildeInPath,
+          mode: mode,
+          opacity: try image["opacity"].map { try number($0, "\(path).image.opacity", 0...1) } ?? 1,
+          align: align,
+          maxWidth: try image["max_width"].map { try number($0, "\(path).image.max_width", 0.01...1) } ?? 1,
+          maxHeight: try image["max_height"].map { try number($0, "\(path).image.max_height", 0.01...1) } ?? 1
+        )
+      }
+    }
+    return result
+  }
+
+  private static func dictionary(_ value: Any, _ path: String) throws -> [String: Any] {
+    guard let result = value as? [String: Any] else {
+      throw ConfigFormatError(tr("app_config.not_object", ["path": path]))
+    }
+    return result
+  }
+
+  private static func isBool(_ value: Any) -> Bool {
+    guard let number = value as? NSNumber else { return false }
+    return CFGetTypeID(number) == CFBooleanGetTypeID()
+  }
+
+  private static func bool(_ value: Any, _ path: String) throws -> Bool {
+    guard isBool(value) else {
+      throw ConfigFormatError(tr("app_config.not_bool", ["path": path]))
+    }
+    return (value as! NSNumber).boolValue
+  }
+
+  private static func number(_ value: Any, _ path: String, _ range: ClosedRange<Double>) throws -> Double {
+    guard let number = value as? NSNumber, !isBool(value), range.contains(number.doubleValue) else {
+      throw ConfigFormatError(
+        tr("app_config.out_of_range", ["path": path, "min": formatNumber(range.lowerBound), "max": formatNumber(range.upperBound)])
+      )
+    }
+    return number.doubleValue
+  }
+
+  /// 名前を並べた文言（「・」などでつなぐ）。
+  private static func list(_ names: [String]) -> String {
+    names.joined(separator: tr("app_config.list_separator"))
+  }
+
+  /// [path] の [name] は使えない、という誤り（使える名前 [names] を添える）。
+  private static func unknownKey(_ path: String, _ name: String, _ names: [String]) -> ConfigFormatError {
+    ConfigFormatError(tr("app_config.unknown_key", ["path": path, "name": name, "names": list(names)]))
+  }
+
+  private static func formatNumber(_ value: Double) -> String {
+    value == value.rounded() ? String(Int(value)) : String(value)
+  }
+
+  /// 「#RRGGBB」か、透明度つきの「#RRGGBBAA」。
+  private static func rgba(_ value: Any, _ path: String) throws -> Rgba {
+    guard let text = value as? String, text.hasPrefix("#"), [7, 9].contains(text.count),
+      let number = Int(text.dropFirst(), radix: 16)
+    else {
+      throw ConfigFormatError(tr("app_config.not_color", ["path": path]))
+    }
+    return text.count == 7 ? Rgba(Rgb(number)) : Rgba(Rgb(number >> 8), Double(number & 0xff) / 255)
   }
 }
 
@@ -83,136 +441,4 @@ struct ConfigFormatError: Error, CustomStringConvertible {
   let message: String
 
   var description: String { message }
-}
-
-/// 設定ファイルに使う YAML の一部（字下げした対応付け・スカラー・コメント）。
-indirect enum YamlValue: Equatable {
-  case null
-  case scalar(String)
-  case quoted(String)
-  case map([(String, YamlValue)])
-
-  static func == (a: YamlValue, b: YamlValue) -> Bool {
-    switch (a, b) {
-    case (.null, .null): true
-    case let (.scalar(x), .scalar(y)), let (.quoted(x), .quoted(y)): x == y
-    case let (.map(x), .map(y)): x.count == y.count && zip(x, y).allSatisfy { $0.0 == $1.0 && $0.1 == $1.1 }
-    default: false
-    }
-  }
-}
-
-/// [text] を読む。空（コメントだけ）なら nil。
-func parseYaml(_ text: String) throws -> YamlValue? {
-  // 字下げと、コメントを除いた中身の行。
-  var lines: [(number: Int, indent: Int, text: String)] = []
-  for (i, raw) in text.components(separatedBy: "\n").enumerated() {
-    let line = stripComment(raw.hasSuffix("\r") ? String(raw.dropLast()) : raw)
-    let content = line.trimmingCharacters(in: .whitespaces)
-    if content.isEmpty || content == "---" {
-      continue
-    }
-    if line.hasPrefix("\t") {
-      throw ConfigFormatError("\(i + 1)行目: 字下げにタブは使えません。")
-    }
-    lines.append((i + 1, line.prefix { $0 == " " }.count, content))
-  }
-  if lines.isEmpty {
-    return nil
-  }
-  var index = 0
-  if !lines[0].text.contains(":") {
-    // 対応付けでなければ、1つのスカラー。
-    if lines.count > 1 {
-      throw ConfigFormatError("\(lines[1].number)行目: 読めません。")
-    }
-    return scalar(lines[0].text)
-  }
-  let value = try parseMap(lines, &index, indent: lines[0].indent)
-  if index < lines.count {
-    throw ConfigFormatError("\(lines[index].number)行目: 字下げが合いません。")
-  }
-  return value
-}
-
-private func parseMap(_ lines: [(number: Int, indent: Int, text: String)], _ index: inout Int, indent: Int) throws -> YamlValue {
-  var entries: [(String, YamlValue)] = []
-  while index < lines.count && lines[index].indent == indent {
-    let line = lines[index]
-    guard let colon = keyEnd(line.text) else {
-      throw ConfigFormatError("\(line.number)行目: 「名前: 値」の形で書いてください。")
-    }
-    let key = unquote(String(line.text[..<colon]).trimmingCharacters(in: .whitespaces))
-    let rest = String(line.text[line.text.index(after: colon)...]).trimmingCharacters(in: .whitespaces)
-    if entries.contains(where: { $0.0 == key }) {
-      throw ConfigFormatError("\(line.number)行目: 「\(key)」が2回あります。")
-    }
-    index += 1
-    if !rest.isEmpty {
-      entries.append((key, scalar(rest)))
-    } else if index < lines.count && lines[index].indent > indent {
-      entries.append((key, try parseMap(lines, &index, indent: lines[index].indent)))
-    } else {
-      entries.append((key, .null))
-    }
-  }
-  if index < lines.count && lines[index].indent > indent {
-    throw ConfigFormatError("\(lines[index].number)行目: 字下げが合いません。")
-  }
-  return .map(entries)
-}
-
-/// 「名前: 」の「:」の位置（引用符の中は除く）。
-private func keyEnd(_ text: String) -> String.Index? {
-  var quote: Character?
-  var i = text.startIndex
-  while i < text.endIndex {
-    let c = text[i]
-    if let q = quote {
-      if c == q { quote = nil }
-    } else if c == "\"" || c == "'" {
-      quote = c
-    } else if c == ":" {
-      let next = text.index(after: i)
-      if next == text.endIndex || text[next] == " " {
-        return i
-      }
-    }
-    i = text.index(after: i)
-  }
-  return nil
-}
-
-/// 「 #」から後ろを除く（引用符の中は除く）。
-private func stripComment(_ line: String) -> String {
-  var quote: Character?
-  var previous: Character = " "
-  var i = line.startIndex
-  while i < line.endIndex {
-    let c = line[i]
-    if let q = quote {
-      if c == q { quote = nil }
-    } else if c == "\"" || c == "'" {
-      quote = c
-    } else if c == "#" && (previous == " " || i == line.startIndex) {
-      return String(line[..<i])
-    }
-    previous = c
-    i = line.index(after: i)
-  }
-  return line
-}
-
-private func unquote(_ s: String) -> String {
-  if s.count >= 2, let first = s.first, first == "\"" || first == "'", s.last == first {
-    return String(s.dropFirst().dropLast())
-  }
-  return s
-}
-
-private func scalar(_ s: String) -> YamlValue {
-  if s.count >= 2, let first = s.first, first == "\"" || first == "'", s.last == first {
-    return .quoted(String(s.dropFirst().dropLast()))
-  }
-  return s == "~" || s == "null" || s == "Null" || s == "NULL" ? .null : .scalar(s)
 }

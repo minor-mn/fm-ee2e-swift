@@ -39,13 +39,13 @@ class DeleteCommand: Command {
 
 /// ゴミ箱へ移す。
 final class LocalDelete: DeleteCommand {
-  override var title: String { "ゴミ箱に移動" }
+  override var title: String { tr("delete.trash_title") }
 
-  override func message(_ c: CommandContext, _ label: String) -> String { "\(label)をゴミ箱に移動します。" }
+  override func message(_ c: CommandContext, _ label: String) -> String { tr("delete.trash_confirm", ["label": label]) }
 
-  override var yes: String { "移動する" }
+  override var yes: String { tr("delete.trash_yes") }
 
-  override var progress: String { "移動中…" }
+  override var progress: String { tr("delete.trash_progress") }
 
   override func remove(_ c: CommandContext, _ targets: [Mark]) async throws {
     let pane = c.pane as! LocalPane
@@ -57,15 +57,15 @@ final class LocalDelete: DeleteCommand {
 
 /// ゴミ箱はないので、そのまま消す。
 final class SshDelete: DeleteCommand {
-  override var title: String { "削除" }
+  override var title: String { tr("delete.ssh_title") }
 
   override func message(_ c: CommandContext, _ label: String) -> String {
-    "\(label)を \((c.pane as! SshPane).ssh!.host) から削除します。\nゴミ箱はないので、元に戻せません。"
+    tr("delete.ssh_confirm", ["label": label, "host": (c.pane as! SshPane).ssh!.host])
   }
 
-  override var yes: String { "削除する" }
+  override var yes: String { tr("delete.ssh_yes") }
 
-  override var progress: String { "削除中…" }
+  override var progress: String { tr("delete.ssh_progress") }
 
   override func remove(_ c: CommandContext, _ targets: [Mark]) async throws {
     let pane = c.pane as! SshPane
@@ -75,13 +75,13 @@ final class SshDelete: DeleteCommand {
 
 /// ゴミ箱へ移す（Google Drive のゴミ箱に入る）。
 final class DriveDelete: DeleteCommand {
-  override var title: String { "ゴミ箱に移動" }
+  override var title: String { tr("delete.trash_title") }
 
-  override func message(_ c: CommandContext, _ label: String) -> String { "\(label)をゴミ箱に移動します。" }
+  override func message(_ c: CommandContext, _ label: String) -> String { tr("delete.trash_confirm", ["label": label]) }
 
-  override var yes: String { "移動する" }
+  override var yes: String { tr("delete.trash_yes") }
 
-  override var progress: String { "移動中…" }
+  override var progress: String { tr("delete.trash_progress") }
 
   override func remove(_ c: CommandContext, _ targets: [Mark]) async throws {
     let pane = c.pane as! DrivePane

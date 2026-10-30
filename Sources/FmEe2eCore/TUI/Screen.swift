@@ -1,3 +1,5 @@
+import AppKit
+
 /// 24ビットカラー。
 nonisolated struct Rgb: Hashable, Sendable {
   init(_ value: Int) {
@@ -14,38 +16,74 @@ nonisolated struct Rgb: Hashable, Sendable {
     func channel(_ a: Int, _ b: Int) -> Int { Int((Double(a) + Double(b - a) * t).rounded()) }
     return Rgb((channel(r, other.r) << 16) | (channel(g, other.g) << 8) | channel(b, other.b))
   }
+
+  /// 同じ色を、不透明度 [opacity]（0〜1）で塗るもの（GUI 版だけ効く）。透け具合は上の8ビットに持つ。
+  func withOpacity(_ opacity: Double) -> Rgb {
+    value < 0 ? self : Rgb((value & 0xFFFFFF) | Int(((1 - opacity) * 255).rounded()) << 24)
+  }
+
+  /// [withOpacity] で決めた不透明度。
+  var opacity: Double { value < 0 ? 1 : 1 - Double((value >> 24) & 0xff) / 255 }
+
+  /// 不透明度を除いた色。
+  var opaque: Rgb { value < 0 ? self : Rgb(value & 0xFFFFFF) }
 }
 
-/// テーマ色。
+extension Rgb {
+  /// 枠の中の端末の、既定の文字色・地の色（描くときに、その範囲の [Palette.text]・[Palette.background] にする）。
+  static let defaultForeground = Rgb(-1)
+  static let defaultBackground = Rgb(-2)
+}
+
+/// テーマ色。描いている範囲の見た目（[Theme.active]）の色を返す。
 nonisolated enum Palette {
-  static let background = Rgb(0x12161D)
-  static let surface = Rgb(0x181D26)
-  static let surfaceHigh = Rgb(0x212835)
-  static let outline = Rgb(0x2C3342)
-  static let text = Rgb(0xEDEFF2)
-  static let muted = Rgb(0x98A1B0)
-  static let lime = Rgb(0xE3F86A)
+  private static var colors: ThemeColors { Theme.active.colors }
+
+  static var background: Rgb { colors.background }
+  static var surface: Rgb { colors.surface }
+  static var surfaceHigh: Rgb { colors.surfaceHigh }
+  static var outline: Rgb { colors.outline }
+  static var text: Rgb { colors.text }
+  static var muted: Rgb { colors.muted }
+  static var lime: Rgb { colors.lime }
 
   /// [lime] の上でも見分けられる、緑の強い黄緑。
-  static let yellowGreen = Rgb(0x8EDB3C)
-  static let purple = Rgb(0x9B6BFF)
-  static let purpleDeep = Rgb(0x5B34C9)
-  static let green = Rgb(0x2EE0A8)
-  static let greenDeep = Rgb(0x128F6D)
-  static let error = Rgb(0xFF7A6B)
-  static let red = Rgb(0xFF4D5E)
-  static let cyan = Rgb(0x5CD8FF)
-  static let orange = Rgb(0xFF9F43)
+  static var yellowGreen: Rgb { colors.yellowGreen }
+  static var purple: Rgb { colors.purple }
+  static var purpleDeep: Rgb { colors.purpleDeep }
+  static var green: Rgb { colors.green }
+  static var greenDeep: Rgb { colors.greenDeep }
+  static var error: Rgb { colors.error }
+  static var red: Rgb { colors.red }
+  static var cyan: Rgb { colors.cyan }
+  static var orange: Rgb { colors.orange }
 
   /// 右の窓（Google Drive・git・SSH）のカーソルの行の地の色。
-  static let greenDark = Rgb(0x0F4A3A)
-  static let orangeDark = Rgb(0x6B3A12)
-  static let cyanDark = Rgb(0x124A5E)
+  static var greenDark: Rgb { colors.greenDark }
+  static var orangeDark: Rgb { colors.orangeDark }
+  static var cyanDark: Rgb { colors.cyanDark }
 
   /// 差分の、追加した行・消した行の地の色。
-  static let addedLine = Rgb(0x12392D)
-  static let removedLine = Rgb(0x481C24)
-  static let selected = Rgb(0x3A2A6E)
+  static var addedLine: Rgb { colors.addedLine }
+  static var removedLine: Rgb { colors.removedLine }
+  static var selected: Rgb { colors.selected }
+
+  /// 窓の先頭の場所（パス）の色。
+  static var location: Rgb { colors.location }
+
+  /// ステータスバーの文字の色。
+  static var statusbar: Rgb { colors.statusbar }
+
+  /// ファイル名の色。
+  static var directory: Rgb { colors.directory }
+  static var executable: Rgb { colors.executable }
+  static var hidden: Rgb { colors.hidden }
+  static var marked: Rgb { colors.marked }
+  static var symlink: Rgb { colors.symlink }
+
+  /// 差分の、追加した行・消した行の印と数の色。
+  static var diffAdded: Rgb { colors.diffAdded }
+  static var diffRemoved: Rgb { colors.diffRemoved }
 }
 
 nonisolated struct Style: Hashable, Sendable {
@@ -62,7 +100,7 @@ nonisolated struct Style: Hashable, Sendable {
   var bold: Bool
   var underline: Bool
 
-  /// リンク先の URL（OSC 8 のハイパーリンクにする。iTerm2 では Command+クリックで開く）。
+  /// リンク先の URL（⌘+クリックで開く）。
   var link: String?
 
   func copyWith(fg: Rgb? = nil, bg: Rgb? = nil, bold: Bool? = nil, underline: Bool? = nil, link: String? = nil) -> Style {
@@ -73,10 +111,6 @@ nonisolated struct Style: Hashable, Sendable {
   func withLink(_ link: String?) -> Style {
     Style(fg: fg, bg: bg, bold: bold, underline: underline, link: link)
   }
-
-  var sgr: String {
-    "\u{1b}[0;\(bold ? "1;" : "")\(underline ? "4;" : "")38;2;\(fg.r);\(fg.g);\(fg.b);48;2;\(bg.r);\(bg.g);\(bg.b)m"
-  }
 }
 
 private nonisolated struct Cell: Equatable {
@@ -84,56 +118,103 @@ private nonisolated struct Cell: Equatable {
   var text: String
   var style: Style
 
+  /// まだ何も書いていない、透明なセル（下の画面が見える）。重ねる画面（[Screen.layer] の clear）だけで使う。
+  var clear = false
+
   static func == (a: Cell, b: Cell) -> Bool {
     // 文字はスカラー値で比べる（Swift の == は正規等価で比べるため）。
-    a.style == b.style && a.text.unicodeScalars.elementsEqual(b.text.unicodeScalars)
+    a.style == b.style && a.clear == b.clear && a.text.unicodeScalars.elementsEqual(b.text.unicodeScalars)
   }
 }
 
-/// 文字のセルの上に重ねる画像（iTerm2 の画像表示）。
-nonisolated struct ScreenImage: Sendable {
-  init(_ x: Int, _ y: Int, _ w: Int, _ h: Int, _ id: String, _ base64: String, name: String = "", size: Int = 0) {
+/// 画面のセルの大きさを決めるもの（GUI 版）。見た目ごとに文字の大きさが違うので、
+/// [from] の見た目で幅 [width]・高さ [height] の範囲に、[to] の見た目のセルが何桁・何行入るかを返す。
+protocol GridSizer: AnyObject {
+  func gridSize(_ width: Int, _ height: Int, from: ThemeKey, to: ThemeKey) -> (Int, Int)
+}
+
+/// マウスで範囲を選んでコピーできる中身（GUI 版）。画面から流れた行も含めて、上から数えた行で扱う。
+protocol SelectionSource: AnyObject {
+  /// 行の数。
+  var lineCount: Int { get }
+
+  /// 画面の一番上に出している行。
+  var firstVisibleLine: Int { get }
+
+  /// [line] 行目のセルの文字（全角文字の右半分は空文字）と、端で折り返して次の行に続いているか。
+  func lineCells(_ line: Int) -> (cells: [String], continues: Bool)
+
+  /// 画面に出す行を [delta] 行ずらす（正なら新しい方へ）。
+  func scrollLines(_ delta: Int)
+}
+
+/// 画面の上に重ねた画面（[Screen.layer]）。
+final class ScreenLayer {
+  init(_ x: Int, _ y: Int, _ w: Int, _ h: Int, _ screen: Screen, selection: SelectionSource?, framed: Bool, fill: Rgb?) {
     self.x = x
     self.y = y
     self.w = w
     self.h = h
-    self.id = id
-    self.base64 = base64
-    self.name = name
-    self.size = size
+    self.screen = screen
+    self.selection = selection
+    self.framed = framed
+    self.fill = fill
+  }
+
+  /// 枠の中に塗る色（見た目の背景の代わり。GUI 版）。透明度は [ThemeColors.alphas] による。
+  let fill: Rgb?
+
+  /// 画面の縁に枠（[Screen.box]）を描く。GUI 版では、背景を枠の線の内側だけに塗る。
+  let framed: Bool
+
+  /// 親の画面のセルで数えた位置と大きさ。
+  let x: Int
+  let y: Int
+  let w: Int
+  let h: Int
+  let screen: Screen
+
+  /// マウスで範囲を選んでコピーできる中身（GUI 版）。選べなければ nil。
+  private(set) weak var selection: SelectionSource?
+}
+
+/// 文字のセルの上に重ねる画像（プレビュー）。
+struct ScreenImage {
+  init(_ x: Int, _ y: Int, _ w: Int, _ h: Int, _ image: NSImage) {
+    self.x = x
+    self.y = y
+    self.w = w
+    self.h = h
+    self.image = image
   }
 
   let x: Int
   let y: Int
   let w: Int
   let h: Int
-
-  /// 同じ画像かを見分ける名前。
-  let id: String
-  let base64: String
-
-  /// iTerm2 の確認ダイアログに出る名前（base64）と、画像のバイト数。
-  let name: String
-  let size: Int
-
-  func covers(_ row: Int) -> Bool { row >= y && row < y + h }
-
-  func same(_ other: ScreenImage?) -> Bool {
-    guard let other else { return false }
-    return other.id == id && other.x == x && other.y == y && other.w == w && other.h == h
-  }
+  let image: NSImage
 }
 
-/// 1画面分の描画バッファ。前回との差分の行だけを端末に書く。
+/// 1画面分の描画バッファ。窓（[GridView]）がこれを描く。
 final class Screen {
-  init(_ width: Int, _ height: Int) {
+  /// [theme] はこの画面の見た目、[sizer] は重ねる画面の大きさを決めるもの（なければ同じ大きさ）。
+  /// [clear] なら、どのセルも透明（[layer] で重ねるダイアログ用）。
+  init(_ width: Int, _ height: Int, theme: ThemeKey = .window, sizer: GridSizer? = nil, clear: Bool = false) {
     self.width = width
     self.height = height
-    cells = Array(repeating: Cell(text: " ", style: Style()), count: max(0, width * height))
+    self.theme = theme
+    self.sizer = sizer
+    self.clear = clear
+    cells = Array(repeating: Cell(text: " ", style: Style(), clear: clear), count: max(0, width * height))
   }
 
   let width: Int
   let height: Int
+  let theme: ThemeKey
+  let sizer: GridSizer?
+
+  /// 透明なセルで始めた画面。
+  let clear: Bool
   private var cells: [Cell]
 
   /// 入力欄など、端末のカーソルを表示する位置（IMEの変換位置にもなる）。
@@ -142,7 +223,56 @@ final class Screen {
   /// セルの上に重ねる画像。下のセルは空白にしておく。
   var image: ScreenImage?
 
+  /// 上に重ねた画面（描いた順。後のものほど上）。
+  private(set) var layers: [ScreenLayer] = []
+
   private func index(_ x: Int, _ y: Int) -> Int { y * width + x }
+
+  /// [x]・[y] のセルの文字（全角文字の右半分は空文字）と書式。透明なセルは nil。
+  func cell(_ x: Int, _ y: Int) -> (text: String, style: Style)? {
+    let cell = cells[index(x, y)]
+    return cell.clear ? nil : (cell.text, cell.style)
+  }
+
+  /// [x]・[y] から幅 [w]・高さ [h] の範囲に、見た目 [theme] の画面を重ねて [draw] で描く。
+  /// GUI 版では文字の大きさが見た目ごとに違うので、重ねる画面の桁数・行数は [sizer] が決める。
+  /// [clear] なら透明なセルで始め、書いたセルだけが下の画面を隠す。
+  /// [selection] があれば、GUI 版でマウスで範囲を選んでコピーできる。
+  func layer(
+    _ x: Int, _ y: Int, _ w: Int, _ h: Int,
+    theme: ThemeKey,
+    clear: Bool = false,
+    selection: SelectionSource? = nil,
+    framed: Bool = false,
+    fill: Rgb? = nil,
+    _ draw: (Screen) -> Void
+  ) {
+    let w = max(0, min(w, width - x))
+    let h = max(0, min(h, height - y))
+    let previous = Theme.active
+    Theme.active = Appearance.current.theme(theme)
+    defer { Theme.active = previous }
+    let (columns, rows) = sizer?.gridSize(w, h, from: self.theme, to: theme) ?? (w, h)
+    let screen = Screen(max(0, columns), max(0, rows), theme: theme, sizer: sizer, clear: clear)
+    draw(screen)
+    layers.append(ScreenLayer(x, y, w, h, screen, selection: selection, framed: framed, fill: fill))
+  }
+
+  /// この画面と重ねた画面のカーソルを消す。
+  func removeCursors() {
+    cursor = nil
+    for layer in layers {
+      layer.screen.removeCursors()
+    }
+  }
+
+  /// この画面と重ねた画面の画像を消す。
+  func removeImages() {
+    image = nil
+    for layer in layers {
+      layer.screen.removeImages()
+    }
+  }
 
   /// [col] から幅 [w] のセルに書く。全角文字の片側だけが残らないよう、はみ出した半分は空白にする。
   private func put(_ col: Int, _ y: Int, _ text: String, _ style: Style, _ w: Int) {
@@ -220,76 +350,5 @@ final class Screen {
     if let title {
       text(x + 2, y, " \(truncate(title, w - 6)) ", titleStyle ?? style, maxWidth: w - 4)
     }
-  }
-
-  /// [previous] との差分を端末へのエスケープシーケンスにする。
-  /// 画像は、前回と同じなら下のセルを書かずに残し、変わったときだけ描き直す。
-  func diff(_ previous: Screen?) -> String {
-    var out = ""
-    let full = previous == nil || previous!.width != width || previous!.height != height
-    let img = image
-    let keep = !full && img != nil && img!.same(previous!.image)
-    let old = full ? nil : previous!.image
-    for y in 0..<height {
-      // 前回の画像が消えたり動いたりした行は、画像を消すために書き直す。
-      let erase = old != nil && !keep && old!.covers(y)
-      if !full && !erase && rowEquals(previous!, y) {
-        continue
-      }
-      // 残す画像の下のセルは書かない（書くと画像が消える）。
-      let skip = keep && img!.covers(y)
-      out += "\u{1b}[\(y + 1);1H"
-      var current: Style?
-      // 開いているリンク（OSC 8）。行の終わりでは必ず閉じる。
-      var link: String?
-      func linkTo(_ url: String?) {
-        if url != link {
-          out += "\u{1b}]8;;\(url ?? "")\u{1b}\\"
-          link = url
-        }
-      }
-      var x = 0
-      while x < width {
-        if skip, let img, x == img.x {
-          linkTo(nil)
-          x = img.x + img.w - 1
-          out += "\u{1b}[\(y + 1);\(x + 2)H"
-          x += 1
-          continue
-        }
-        let cell = cells[index(x, y)]
-        x += 1
-        if cell.text.isEmpty {
-          continue
-        }
-        if cell.style != current {
-          current = cell.style
-          out += cell.style.sgr
-          linkTo(cell.style.link)
-        }
-        out += cell.text
-      }
-      linkTo(nil)
-    }
-    out += "\u{1b}[0m"
-    if let img, !keep {
-      out +=
-        "\u{1b}[\(img.y + 1);\(img.x + 1)H"
-        + "\u{1b}]1337;File=\(img.name.isEmpty ? "" : "name=\(img.name);")size=\(img.size);inline=1;"
-        + "width=\(img.w);height=\(img.h);preserveAspectRatio=1:\(img.base64)\u{07}"
-    }
-    if let c = cursor {
-      out += "\u{1b}[\(c.y + 1);\(c.x + 1)H\u{1b}[?25h"
-    } else {
-      out += "\u{1b}[?25l"
-    }
-    return out
-  }
-
-  private func rowEquals(_ other: Screen, _ y: Int) -> Bool {
-    for x in 0..<width where cells[index(x, y)] != other.cells[other.index(x, y)] {
-      return false
-    }
-    return true
   }
 }

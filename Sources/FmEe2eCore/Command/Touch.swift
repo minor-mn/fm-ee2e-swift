@@ -9,7 +9,7 @@ class TouchCommand: Command {
   func touch(_ c: CommandContext, _ name: String) async throws { fatalError("touch") }
 
   override func run(_ c: CommandContext) async {
-    await applyName(c.pane, await askName(c.app, "touch", message: "ファイル名")) { name in try await self.touch(c, name) }
+    await applyName(c.pane, await askName(c.app, "touch", message: tr("touch.message"))) { name in try await self.touch(c, name) }
   }
 }
 

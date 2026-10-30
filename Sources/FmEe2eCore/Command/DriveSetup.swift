@@ -13,7 +13,7 @@ final class DriveSetup: Command {
   }
 
   private func setUpKey(_ c: CommandContext, _ pane: DrivePane) async {
-    let choice = await c.app.askChoice("鍵を用意する", ["新しい鍵を生成", "既存の鍵をペースト"])
+    let choice = await c.app.askChoice(tr("drive_setup.title"), [tr("drive_setup.generate_title"), tr("drive_setup.paste_title")])
     let key: Data? =
       switch choice {
       case 0: await generate(c, pane)
@@ -26,7 +26,7 @@ final class DriveSetup: Command {
     do {
       try await KeyFile.save(pane.keyFile, key)
     } catch {
-      await c.app.showError("保存できませんでした: \(errorMessage(error))")
+      await c.app.showError(tr("drive_setup.save_failed", ["error": errorMessage(error)]))
       return
     }
     await pane.check()
@@ -34,17 +34,17 @@ final class DriveSetup: Command {
 
   private func generate(_ c: CommandContext, _ pane: DrivePane) async -> Data? {
     let ok = await c.app.confirm(
-      "新しい鍵を生成",
-      "新しい鍵を \(pane.keyFile) に保存します。\n鍵を失うと暗号化したファイルは復号できません。バックアップを別に保管してください。",
-      yes: "生成する"
+      tr("drive_setup.generate_title"),
+      tr("drive_setup.generate_confirm", ["key_file": pane.keyFile]),
+      yes: tr("drive_setup.generate_yes")
     )
     return ok ? KeyFile.generate() : nil
   }
 
   private func paste(_ c: CommandContext) async -> Data? {
     let text = await c.app.input(
-      "既存の鍵をペースト",
-      message: "1行目が \(KeyFile.header)、2行目が鍵のBase64のテキストを貼り付けてください。",
+      tr("drive_setup.paste_title"),
+      message: tr("drive_setup.paste_message", ["header": KeyFile.header]),
       masked: true,
       allowNewlines: true,
       validate: { value in

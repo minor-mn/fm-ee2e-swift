@@ -19,7 +19,7 @@ class PasteCommand: Command {
       return
     }
     if !accepts(c, clip) {
-      await c.app.showError("ローカルとGoogle Drive・SSH の間は G で転送してください。")
+      c.app.showStatus(tr("paste.use_transfer"))
       return
     }
     if !(await check(c, clip)) {
@@ -49,7 +49,7 @@ class PasteCommand: Command {
     var errors: [String] = []
     var first: String?
     do {
-      first = try await c.app.withProgress(move ? "移動中…" : "コピー中…") { try await body(conflicts, &errors) }
+      first = try await c.app.withProgress(move ? tr("paste.moving") : tr("paste.copying")) { try await body(conflicts, &errors) }
     } catch is PlanCancelled {
       // 途中で中止。済んだ分はそのまま。
     }
@@ -96,7 +96,7 @@ class PathPasteCommand: PasteCommand {
           continue
         }
         if context.equals(from, dest) || context.isWithin(from, dest) {
-          errors.append("\(name): フォルダーをその中には\(move ? "移動" : "コピー")できません。")
+          errors.append(tr(move ? "paste.cannot_move_into_itself" : "paste.cannot_copy_into_itself", ["name": name]))
           continue
         }
         var target = name
@@ -164,7 +164,7 @@ final class SshPaste: PathPasteCommand {
 
   override func check(_ c: CommandContext, _ clip: Clip) async -> Bool {
     if (clip as! SshClip).ssh !== (c.pane as! SshPane).ssh {
-      await c.app.showError("コピー・移動した接続とは別の接続です。")
+      c.app.showStatus(tr("paste.other_connection"))
       return false
     }
     return true
@@ -213,7 +213,7 @@ final class DrivePaste: PasteCommand {
           continue
         }
         if item.isDir && (p.equals(item.path, dest) || p.isWithin(item.path, dest)) {
-          errors.append("\(name): フォルダーをその中には\(move ? "移動" : "コピー")できません。")
+          errors.append(tr(move ? "paste.cannot_move_into_itself" : "paste.cannot_copy_into_itself", ["name": name]))
           continue
         }
         var target = name

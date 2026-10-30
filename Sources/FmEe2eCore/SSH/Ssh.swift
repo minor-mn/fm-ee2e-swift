@@ -50,24 +50,26 @@ class Ssh {
   /// マスターの接続を作る引数。つながったら裏に回る。[batch] なら何も聞かずに、聞く必要があれば失敗する。
   /// [via] の接続先で作るときは、-f で裏に回ったマスターが出力をつないだままにして途中の接続が終わらないことがあるので、
   /// -f を使わず true を実行させる（ControlPersist で裏に回るマスターは、出力を /dev/null につなぎ直す）。
-  private func masterArgs(batch: Bool = false) throws -> [String] {
+  /// [inTerminal]（枠の中の端末で聞く）ときも、-f で裏に回ったマスターが端末をつないだままにしないよう、同じく true を実行させる。
+  private func masterArgs(batch: Bool = false, inTerminal: Bool = false) throws -> [String] {
     var args = ["-o", "ControlMaster=yes", "-o", "ControlPath=\(controlPath)", "-o", "ControlPersist=1h"]
     if batch {
       args += ["-o", "BatchMode=yes"]
     }
-    if via == nil {
+    let runsTrue = via != nil || inTerminal
+    if !runsTrue {
       args += ["-f", "-N"]
     }
     args += ["--", host]
-    if via != nil {
+    if runsTrue {
       args.append("true")
     }
     return try wrap(args, tty: !batch)
   }
 
-  /// マスターの接続を作る。パスワードやパスフレーズを聞かれるので、端末を渡して実行する。終了コードを返す。
+  /// マスターの接続を作る実行ファイルと引数。パスワードやパスフレーズを聞かれるので、枠の中の端末で実行する。
   /// 終了時に [close] で閉じる。閉じ忘れても、1時間使わなければ閉じる。
-  func connect() async throws -> Int { try await runInherited(Ssh.executable, try masterArgs()) }
+  func connectCommand() throws -> (String, [String]) { (Ssh.executable, try masterArgs(inTerminal: true)) }
 
   /// 何も聞かずに（鍵や ssh-agent だけで）マスターの接続を作る。つながったら true。
   /// パスワードや、初めてのホストの鍵の確認が要るときは false（そのときは [connect] で聞く）。
@@ -99,9 +101,52 @@ class Ssh {
     let result = try await exec("sh -c \(try shellWord(script))")
     if result.exitCode != 0 {
       let message = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-      throw SshException(message.isEmpty ? "終了コード \(result.exitCode)" : message)
+      throw SshException(message.isEmpty ? tr("ssh.exit_code", ["code": result.exitCode]) : message)
     }
     return result.stdoutData
+  }
+
+  /// リモートの [path] を、手元の [local] に書き出す（cat の出力を、読めた分ずつ書く）。失敗したら [SshException]。
+  /// [started] には、途中でやめる関数を渡す。やめたら [CancellationError] を投げる。
+  func download(_ path: String, to local: String, started: (_ stop: @escaping () -> Void) -> Void = { _ in }) async throws {
+    guard FileManager.default.createFile(atPath: local, contents: nil) else {
+      throw FileSystemException(tr("ssh.cannot_create_file"), local)
+    }
+    let file = try FileHandle(forWritingTo: URL(fileURLWithPath: local))
+    defer {
+      try? file.close()
+    }
+    let process = try RunningProcess(Ssh.executable, try wrap(options + ["--", host, "sh -c \(try shellWord("cat \(shQuote(path))"))"]))
+    var writeError: (any Error)?
+    var err = Data()
+    process.onStdout = { [weak process] data in
+      guard writeError == nil else { return }
+      do {
+        try file.write(contentsOf: data)
+      } catch {
+        writeError = error
+        process?.kill()
+      }
+    }
+    process.onStderr = { err.append($0) }
+    process.closeStdin()
+    var stopped = false
+    started { [weak process] in
+      stopped = true
+      process?.kill()
+    }
+    let code = await process.exitCode
+    await process.waitForOutput()
+    if stopped {
+      throw CancellationError()
+    }
+    if let writeError {
+      throw writeError
+    }
+    if code != 0 {
+      let message = String(decoding: err, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+      throw SshException(message.isEmpty ? tr("ssh.exit_code", ["code": code]) : message)
+    }
   }
 
   /// [run] の出力から、最後の改行を除いた文字列。
@@ -299,7 +344,7 @@ nonisolated func shQuote(_ s: String) -> String { "'\(s.replacingOccurrences(of:
 /// 改行は \ を付けても消えてしまうので扱えない。
 nonisolated func shellWord(_ s: String) throws -> String {
   if s.unicodeScalars.contains("\n") {
-    throw SshException("改行を含む名前は扱えません。")
+    throw SshException(tr("ssh.newline_in_name"))
   }
   if s.isEmpty {
     return "''"

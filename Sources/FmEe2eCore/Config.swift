@@ -8,4 +8,4 @@ nonisolated func expandHome(_ path: String, _ home: String) -> String {
 }
 
 /// 鍵ファイルの既定の場所。
-nonisolated func keyFileLocation() -> String { p.join(homeDir, ".fm-ee2e.key") }
+nonisolated func keyFileLocation() -> String { p.join(homeDir, ".config", "fm-ee2e", ".fm-ee2e.key") }

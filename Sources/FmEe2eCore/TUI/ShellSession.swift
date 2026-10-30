@@ -40,7 +40,7 @@ final class ShellSession {
     environment: [String: String] = [:]
   ) async throws {
     if process != nil || closed {
-      throw AppError("このセッションは開始済みです。")
+      throw AppError(tr("shell_session.already_started"))
     }
     terminal.onResponse = { [weak self] in self?.writeText($0) }
     // Process は子を別のプロセスグループで起動するので、外側の Ctrl+C のシグナルは script に届かない。
@@ -91,11 +91,11 @@ final class ShellSession {
     }
     if await ready.wait(timeoutMilliseconds: 5000) == nil {
       await close()
-      throw AppError("端末を開始できませんでした。")
+      throw AppError(tr("shell_session.start_failed"))
     }
     if tty == nil {
       await close()
-      throw AppError("端末を開始できませんでした。")
+      throw AppError(tr("shell_session.start_failed"))
     }
   }
 

@@ -79,18 +79,18 @@ private final class GitActions {
       return
     }
     if branch == "(no branch)" {
-      await app.showError("ブランチにいないので、リモートを紐付けられません。")
+      app.showStatus(tr("git_commands.remote.no_branch"))
       return
     }
     let remotes = try await pane.git.remotes(root)
     if remotes.isEmpty {
-      await app.showError("リモートが登録されていません。")
+      app.showStatus(tr("git_commands.remote.none_registered"))
       return
     }
     let none = "(no upstream)"
     let options = remotes + [none]
     guard let choice = await app.askChoice(
-      "「\(branch)」の紐付け先", options.map { GitActions.currentMark($0, current) }
+      tr("git_commands.remote.title", ["branch": branch]), options.map { GitActions.currentMark($0, current) }
     ), options[choice] != current else {
       return
     }
@@ -134,11 +134,11 @@ private final class GitActions {
         remoteOnly.append(name)
       }
     }
-    let create = "新しいブランチを作る"
+    let create = tr("git_commands.branch.create")
     // 先頭に「新しいブランチを作る」。そのあとと、手元のブランチとリモートにだけあるブランチの間は、空行で区切る（空文字は選べない区切り）。
     let options = [create, ""] + branches + (remoteOnly.isEmpty ? [] : [""]) + remoteOnly
     guard let choice = await app.askChoice(
-      "ブランチの切り替え", options.map { $0.isEmpty ? "" : GitActions.currentMark($0, current) }
+      tr("git_commands.branch.switch_title"), options.map { $0.isEmpty ? "" : GitActions.currentMark($0, current) }
     ), options[choice] != current else {
       return
     }
@@ -150,16 +150,14 @@ private final class GitActions {
     // コミットしていない変更（untracked を含む）は切り替え先に持っていく。切り替え先と重なると git が止める（変更は消えない）。
     if pane.hasChanges,
       !(await app.confirm(
-        "ブランチの切り替え",
-        "コミットしていない変更があります。変更は切り替え先に持っていきます。\n"
-          + "切り替え先と重なるファイルがあると、git が止めます（変更は消えません）。\n"
-          + "続けますか？",
-        yes: "切り替える"
+        tr("git_commands.branch.switch_title"),
+        tr("git_commands.branch.switch_with_changes"),
+        yes: tr("git_commands.branch.switch_yes")
       ))
     {
       return
     }
-    try await app.withProgress("git switch 中…") {
+    try await app.withProgress(tr("git_commands.running", ["command": "git switch"])) {
       if remoteOnly.contains(chosen) {
         // origin/xxx は、同じ名前の手元のブランチを作って紐付ける。
         try await git.switchBranch(root, String(chosen.dropFirst(remote!.count + 1)), track: chosen)
@@ -176,17 +174,17 @@ private final class GitActions {
   func createBranch(_ pane: GitPane, _ root: String, _ title: String) async throws {
     let name = (await app.input(
       title,
-      message: "今の場所から作るブランチの名前",
-      validate: { value in value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "ブランチ名を入力してください。" : nil }
+      message: tr("git_commands.branch.new_name"),
+      validate: { value in value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? tr("git_commands.branch.name_required") : nil }
     ))?.trimmingCharacters(in: .whitespacesAndNewlines)
     guard let name, !name.isEmpty else {
       return
     }
     if !(try await pane.git.isValidBranchName(root, name)) {
-      await app.showError("「\(name)」はブランチ名に使えません。")
+      await app.showError(tr("git_commands.branch.invalid_name", ["name": name]))
       return
     }
-    try await app.withProgress("git switch 中…") { try await pane.git.switchBranch(root, name, create: true) }
+    try await app.withProgress(tr("git_commands.running", ["command": "git switch"])) { try await pane.git.switchBranch(root, name, create: true) }
     // git status の読み直しは、_run が終わったときに行う。
   }
 
@@ -196,7 +194,7 @@ private final class GitActions {
       return
     }
     if branch == "(no branch)" {
-      await app.showError("ブランチにいないので、push 先を設定できません。")
+      app.showStatus(tr("git_commands.push_remote.no_branch"))
       return
     }
     let current = pane.pushRemote
@@ -204,13 +202,9 @@ private final class GitActions {
     let none = "<no branch.pushRemote>"
     let options = remotes + [none]
     guard let choice = await app.askChoice(
-      "「\(branch)」の push 先",
+      tr("git_commands.push_remote.title", ["branch": branch]),
       options.map { GitActions.currentMark($0, current) },
-      note: "push 先の remote を別に用意する時だけ設定します。通常は不要です。\n"
-        + "追加するには .git/config に次のように書き足します（名前と URL は自分のものに）。\n"
-        + "[remote \"fork\"]\n"
-        + "    url = https://github.com/you/repo.git\n"
-        + "    fetch = +refs/heads/*:refs/remotes/fork/*"
+      note: tr("git_commands.push_remote.note")
     ), options[choice] != current else {
       return
     }
@@ -236,7 +230,7 @@ private final class GitActions {
       // ブランチ名の行などでは何もしない。
       return
     }
-    let pages = try await app.withProgress("git diff 中…") { () async throws -> [DiffPage] in
+    let pages = try await app.withProgress(tr("git_commands.running", ["command": "git diff"])) { () async throws -> [DiffPage] in
       var pages: [DiffPage] = []
       // staged・not staged・untracked の順にページにする。untracked は、全行を追加した差分として出す。
       for section in ["staged", "not staged", "untracked"] {
@@ -253,7 +247,7 @@ private final class GitActions {
       return pages
     }
     if pages.isEmpty {
-      await app.showError("差分はありません。")
+      app.showStatus(tr("git_commands.no_diff"))
       return
     }
     await app.showModal { (close: @escaping (()) -> Void) in DiffView(pages, close) }
@@ -285,7 +279,7 @@ private final class GitActions {
     }
     // コミットするのは staged の全部なので、マークがあるときはそれを添える。
     if pane.hasStaged {
-      commands.append(pane.marks.isEmpty ? "git commit" : "git commit (マークは無視されます)")
+      commands.append(pane.marks.isEmpty ? "git commit" : "git commit" + tr("git_commands.commit.marks_ignored"))
     }
     if onFile {
       commands.append("git log")
@@ -317,16 +311,16 @@ private final class GitActions {
     if command.hasPrefix("git commit") {
       let message = await app.input(
         "git commit",
-        message: "コミットメッセージ",
+        message: tr("git_commands.commit.message"),
         allowNewlines: true,
         validate: { value in
-          value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "コミットメッセージを入力してください。" : nil
+          value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? tr("git_commands.commit.message_required") : nil
         }
       )
       guard let message, !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
         return
       }
-      try await app.withProgress("git commit 中…") {
+      try await app.withProgress(tr("git_commands.running", ["command": "git commit"])) {
         try await pane.git.commit(root, message.trimmingCharacters(in: .whitespacesAndNewlines))
       }
       pane.marks.clear()
@@ -341,7 +335,7 @@ private final class GitActions {
     }
     if command == "git log" {
       let branch = selected[0].text
-      let commits = try await app.withProgress("git log 中…") { try await pane.git.log(root) }
+      let commits = try await app.withProgress(tr("git_commands.running", ["command": "git log"])) { try await pane.git.log(root) }
       await app.showModal { (close: @escaping (()) -> Void) in LogView(app, close, pane.git, root, branch, commits) }
       return
     }
@@ -357,7 +351,7 @@ private final class GitActions {
       // ブランチがリモートに紐付いていなければ（(no upstream)・(no remote)）、push・pull しない。
       let remote = pane.remote
       if remote == nil || remote!.hasPrefix("(") {
-        await app.showMessage(command, "remoteを選択してください")
+        await app.showMessage(command, tr("git_commands.push.no_remote"))
         return
       }
     }
@@ -366,10 +360,8 @@ private final class GitActions {
       if pane.hasChanges,
         !(await app.confirm(
           "git pull",
-          "コミットしていない変更があります。\n"
-            + "pull で取り込む変更と重なると、コンフリクトするかもしれません（同じファイルなら止まります）。\n"
-            + "続けますか？",
-          yes: "続ける"
+          tr("git_commands.pull.with_changes"),
+          yes: tr("git_commands.pull.yes")
         ))
       {
         return
@@ -386,9 +378,11 @@ private final class GitActions {
       let branch = pane.branch
       let ok = await app.confirm(
         "git push --force-with-lease",
-        "リモートの\(branch == nil ? "" : "「\(branch!)」")ブランチを、手元の内容で上書きします。\n"
-          + "リモートが、最後に取り込んだ（fetch した）ときから変わっていれば止まります。",
-        yes: "上書きする"
+        tr(
+          "git_commands.force_push.message",
+          ["branch": branch.map { tr("git_commands.force_push.branch", ["branch": $0]) } ?? ""]
+        ),
+        yes: tr("git_commands.force_push.yes")
       )
       if ok {
         try await gitInTerminal(pane.git, root, ["push", "--force-with-lease"])
@@ -397,15 +391,14 @@ private final class GitActions {
     }
     if command == "git restore" {
       let paths = distinct(lines.map { $0.path })
-      let label = paths.count == 1 ? "「\(paths[0])」" : "\(paths.count)ファイル"
+      let label = paths.count == 1 ? tr("git_commands.label.one", ["path": paths[0]]) : tr("git_commands.label.files", ["count": paths.count])
       let ok = await app.confirm(
         "git restore",
-        "\(label)の、add していない変更を捨てて、add した状態（add していなければ最後のコミット）に戻します。\n"
-          + "捨てた変更は取り戻せません。",
-        yes: "捨てる"
+        tr("git_commands.restore.message", ["label": label]),
+        yes: tr("git_commands.restore.yes")
       )
       if ok {
-        try await app.withProgress("git restore 中…") { try await pane.git.restore(root, paths) }
+        try await app.withProgress(tr("git_commands.running", ["command": "git restore"])) { try await pane.git.restore(root, paths) }
         pane.marks.clear()
         // ファイルの中身が変わるので、左の窓も読み直す（Git の窓は _run が終わったときに読み直す）。
         await onFilesChanged()
@@ -416,7 +409,7 @@ private final class GitActions {
     // 同じファイルが staged と not staged の両方でマークされていても、1回だけ渡す。
     // add の取り消しでは、名前の変更は元と新しいほうの両方を戻す。
     let paths = distinct(lines.flatMap { add ? [$0.path] : $0.paths })
-    try await app.withProgress("\(command) 中…") {
+    try await app.withProgress(tr("git_commands.running", ["command": command])) {
       if add {
         try await pane.git.add(root, paths)
       } else {
@@ -440,7 +433,7 @@ private final class GitActions {
     // Git の窓は左で開いているフォルダーで git を実行するので、パスはそこからの相対パスにする。
     let paths = distinct(targets.map { left.context.relative(left.pathOfMark($0), from: dir) })
     let git = pane.git
-    let states = try await app.withProgress("git status 中…") { try await git.pathStates(dir, paths) }
+    let states = try await app.withProgress(tr("git_commands.running", ["command": "git status"])) { try await git.pathStates(dir, paths) }
     func `where`(_ test: (GitPathState) -> Bool) -> [String] {
       paths.filter { test(states[$0]!) }
     }
@@ -457,13 +450,13 @@ private final class GitActions {
       ("git rm --cached", `where` { $0.tracked }),
     ].filter { !$0.paths.isEmpty }
     if choices.isEmpty {
-      await app.showError("git で扱うものがありません（変更がないか、.gitignore で除いています）。")
+      app.showStatus(tr("git_commands.left.nothing"))
       return
     }
     // 使えるのが対象の一部だけなら、その数を添える。
     guard let choice = await app.askChoice(
       "Git",
-      choices.map { $0.paths.count == paths.count ? $0.command : "\($0.command) (\($0.paths.count)項目)" },
+      choices.map { $0.paths.count == paths.count ? $0.command : tr("git_commands.left.command_with_count", ["command": $0.command, "count": $0.paths.count]) },
       closeKey: { key in key.name == "f12" || key.isLetter("g") },
       closeAtEdges: true
     ) else {
@@ -471,37 +464,35 @@ private final class GitActions {
     }
     let command = choices[choice].command
     let chosen = choices[choice].paths
-    let label = chosen.count == 1 ? "「\(chosen[0])」" : "\(chosen.count)項目"
+    let label = chosen.count == 1 ? tr("git_commands.label.one", ["path": chosen[0]]) : tr("git_commands.label.items", ["count": chosen.count])
     switch command {
     case "git add":
-      try await app.withProgress("git add 中…") { try await git.add(dir, chosen) }
+      try await app.withProgress(tr("git_commands.running", ["command": "git add"])) { try await git.add(dir, chosen) }
     case "git restore --staged":
-      try await app.withProgress("git restore --staged 中…") { try await git.restoreStaged(dir, chosen) }
+      try await app.withProgress(tr("git_commands.running", ["command": "git restore --staged"])) { try await git.restoreStaged(dir, chosen) }
     case "git log":
       try await fileLog(git, pane.root!, dir, chosen[0])
       return
     case "git restore":
       if !(await app.confirm(
         "git restore",
-        "\(label)の、add していない変更を捨てて、add した状態（add していなければ最後のコミット）に戻します。\n"
-          + "捨てた変更は取り戻せません。",
-        yes: "捨てる"
+        tr("git_commands.restore.message", ["label": label]),
+        yes: tr("git_commands.restore.yes")
       )) {
         return
       }
-      try await app.withProgress("git restore 中…") { try await git.restore(dir, chosen) }
+      try await app.withProgress(tr("git_commands.running", ["command": "git restore"])) { try await git.restore(dir, chosen) }
     case "git rm":
       if !(await app.confirm(
         "git rm",
-        "\(label)を git の管理から外し、ファイルも消します（コミットした内容は git に残ります）。\n"
-          + "コミットしていない変更があれば、git が止めます。",
-        yes: "消す"
+        tr("git_commands.rm.message", ["label": label]),
+        yes: tr("git_commands.rm.yes")
       )) {
         return
       }
-      try await app.withProgress("git rm 中…") { try await git.remove(dir, chosen, cached: false) }
+      try await app.withProgress(tr("git_commands.running", ["command": "git rm"])) { try await git.remove(dir, chosen, cached: false) }
     case "git rm --cached":
-      try await app.withProgress("git rm --cached 中…") { try await git.remove(dir, chosen, cached: true) }
+      try await app.withProgress(tr("git_commands.running", ["command": "git rm --cached"])) { try await git.remove(dir, chosen, cached: true) }
     default:
       break
     }
@@ -512,7 +503,7 @@ private final class GitActions {
 
   /// [path]（[dir] からの相対パス）の履歴を出す。差分は、リポジトリの一番上 [root] からのパスで読む。
   private func fileLog(_ git: Git, _ root: String, _ dir: String, _ path: String) async throws {
-    let commits = try await app.withProgress("git log 中…") { try await git.fileLog(dir, path) }
+    let commits = try await app.withProgress(tr("git_commands.running", ["command": "git log"])) { try await git.fileLog(dir, path) }
     await app.showModal { (close: @escaping (()) -> Void) in FileLogView(app, close, git, root, dir, path, commits) }
   }
 
@@ -520,18 +511,18 @@ private final class GitActions {
   private func renameBranch(_ pane: GitPane, _ root: String, _ current: String) async throws {
     let name = await app.input(
       "git branch -m",
-      message: "ブランチの新しい名前",
+      message: tr("git_commands.rename.new_name"),
       initial: current,
-      validate: { value in value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "ブランチ名を入力してください。" : nil }
+      validate: { value in value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? tr("git_commands.branch.name_required") : nil }
     )
     guard let to = name?.trimmingCharacters(in: .whitespacesAndNewlines), !to.isEmpty, to != current else {
       return
     }
     if !(try await pane.git.isValidBranchName(root, to)) {
-      await app.showError("「\(to)」はブランチ名に使えません。")
+      await app.showError(tr("git_commands.branch.invalid_name", ["name": to]))
       return
     }
-    try await app.withProgress("git branch -m 中…") { try await pane.git.renameBranch(root, current, to) }
+    try await app.withProgress(tr("git_commands.running", ["command": "git branch -m"])) { try await pane.git.renameBranch(root, current, to) }
     // git status の読み直しは、_run が終わったときに行う。
   }
 

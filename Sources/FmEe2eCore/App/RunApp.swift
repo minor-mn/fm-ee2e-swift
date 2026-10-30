@@ -1,37 +1,34 @@
-import Darwin
+import Foundation
 
-/// アプリを起動し、終わるまで待つ。終了コードを返す。
-public func runFmEe2e() async -> Int32 {
-  let terminal = Terminal()
-  // 設定ファイルを読めなければ、既定の設定（右の窓のタブはすべて on）で起動して、エラーを出す。
-  var config = AppConfig()
-  var configError: String?
+/// 設定ファイルを読む。読めなければ既定の設定（右の窓のタブはすべて on）と、エラーの文。
+func loadConfig() async -> (AppConfig, String?) {
   do {
-    config = try await AppConfig.load()
+    return (try await AppConfig.load(), nil)
   } catch {
-    configError = errorMessage(error)
+    return (AppConfig(), tr("run_app.config_unreadable", ["error": errorMessage(error)]))
   }
-  do {
-    try terminal.start()
-  } catch {
-    writeStderr("\(errorMessage(error))\n")
-    return 1
+}
+
+/// [host] にメイン画面を出し、終わるまで待つ。[started] でメイン画面を受け取る（Ctrl+C などの終了の要求をつなぐ）。
+/// 見つからなかったフォントを、ステータスバーに出す。
+func showMissingFonts(_ app: App, _ appearance: Appearance) {
+  if !appearance.missingFonts.isEmpty {
+    let fonts = appearance.missingFonts.joined(separator: tr("run_app.font_separator"))
+    app.showStatus(tr("run_app.missing_fonts", ["fonts": fonts]))
   }
-  let app = App(terminal)
+}
+
+func runMain(_ host: Host, _ config: AppConfig, _ configError: String?, started: (MainView) -> Void) async {
+  Appearance.current = config.appearance
+  let app = App(host)
   // 鍵ファイルなどがなくても、すぐメイン画面を出す（Google Drive のタブが使えないだけ）。
   let main = MainView(app, config: config)
   if let configError {
-    Task { await app.showError("~/.config/fm-ee2e/config.yml を読み込めません。\n\(configError)") }
+    // 設定ファイル・文言のファイルを読み込めなかったときは、既定の設定で起動してエラーを出す。
+    Task { await app.showError(configError) }
   }
-  // Ctrl+C はメイン画面では終了の確認を出す。実行したプログラムの中で押した分は無視する。
-  let sigint = watchSignal(SIGINT) {
-    if !terminal.suspended {
-      main.requestQuit()
-    }
-  }
+  showMissingFonts(app, config.appearance)
+  started(main)
   await app.run(main)
-  sigint.cancel()
   await deleteOpenTemps()
-  terminal.restore()
-  return 0
 }

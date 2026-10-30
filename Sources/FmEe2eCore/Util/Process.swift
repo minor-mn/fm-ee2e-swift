@@ -37,7 +37,7 @@ struct ProcessError: Error, CustomStringConvertible {
   let message: String
   let errorCode: Int
 
-  var description: String { message.isEmpty ? "\(executable) \(arguments.joined(separator: " ")) が失敗しました" : message }
+  var description: String { message.isEmpty ? tr("process.failed", ["command": "\(executable) \(arguments.joined(separator: " "))"]) : message }
 }
 
 /// 利用者に見せるエラーの文言。
@@ -53,7 +53,7 @@ func errorMessage(_ error: any Error) -> String {
 nonisolated func shellStatus(_ exitCode: Int) -> Int { exitCode < 0 ? 128 - exitCode : exitCode }
 
 /// 端末に出す終了コード。
-nonisolated func exitStatusText(_ exitCode: Int) -> String { "[終了コード \(shellStatus(exitCode))]" }
+nonisolated func exitStatusText(_ exitCode: Int) -> String { tr("process.exit_status", ["code": shellStatus(exitCode)]) }
 
 /// 外部コマンドの結果。
 nonisolated struct ProcResult: Sendable {
@@ -90,8 +90,7 @@ final class RunningProcess {
     _ executable: String,
     _ arguments: [String],
     workingDirectory: String? = nil,
-    environment: [String: String]? = nil,
-    inheritStdio: Bool = false
+    environment: [String: String]? = nil
   ) throws {
     let process = Process()
     process.executableURL = URL(fileURLWithPath: resolveExecutable(executable))
@@ -103,23 +102,17 @@ final class RunningProcess {
       process.environment = ProcessInfo.processInfo.environment.merging(environment) { _, new in new }
     }
     self.process = process
-    if inheritStdio {
-      stdinPipe = nil
-      stdoutPipe = nil
-      stderrPipe = nil
-    } else {
-      let stdinPipe = Pipe()
-      let stdoutPipe = Pipe()
-      let stderrPipe = Pipe()
-      process.standardInput = stdinPipe
-      // 終わった子プロセスの標準入力に書いても、SIGPIPE でこのアプリが落ちないようにする。
-      _ = fcntl(stdinPipe.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
-      process.standardOutput = stdoutPipe
-      process.standardError = stderrPipe
-      self.stdinPipe = stdinPipe
-      self.stdoutPipe = stdoutPipe
-      self.stderrPipe = stderrPipe
-    }
+    let stdinPipe = Pipe()
+    let stdoutPipe = Pipe()
+    let stderrPipe = Pipe()
+    process.standardInput = stdinPipe
+    // 終わった子プロセスの標準入力に書いても、SIGPIPE でこのアプリが落ちないようにする。
+    _ = fcntl(stdinPipe.fileHandleForWriting.fileDescriptor, F_SETNOSIGPIPE, 1)
+    process.standardOutput = stdoutPipe
+    process.standardError = stderrPipe
+    self.stdinPipe = stdinPipe
+    self.stdoutPipe = stdoutPipe
+    self.stderrPipe = stderrPipe
     process.terminationHandler = { [weak self] p in
       let code = p.terminationReason == .uncaughtSignal ? -Int(p.terminationStatus) : Int(p.terminationStatus)
       DispatchQueue.main.async {
@@ -136,7 +129,7 @@ final class RunningProcess {
     do {
       try process.run()
     } catch {
-      throw ProcessError(executable, arguments, "\(executable) を実行できません: \(error.localizedDescription)", -1)
+      throw ProcessError(executable, arguments, tr("process.cannot_run", ["executable": executable, "error": error.localizedDescription]), -1)
     }
     startReading()
   }
@@ -276,10 +269,4 @@ func runOrThrow(_ executable: String, _ arguments: [String]) async throws {
   if result.exitCode != 0 {
     throw CommandFailed(result.stderr.trimmingCharacters(in: .whitespacesAndNewlines))
   }
-}
-
-/// 端末をそのまま渡して [executable] を実行し、終了コードを返す。
-func runInherited(_ executable: String, _ arguments: [String], workingDirectory: String? = nil) async throws -> Int {
-  let process = try RunningProcess(executable, arguments, workingDirectory: workingDirectory, inheritStdio: true)
-  return await process.exitCode
 }

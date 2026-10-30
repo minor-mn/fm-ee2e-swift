@@ -35,7 +35,7 @@ class ShellCommand: Command {
     do {
       let place = self.place(c)
       let command = await c.app.input(
-        "シェル",
+        tr("shell.title"),
         message: place,
         history: try await history(c),
         complete: { before in

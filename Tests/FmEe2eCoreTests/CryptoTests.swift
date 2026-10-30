@@ -255,4 +255,12 @@ private func withTempDir<T>(_ body: (String) async throws -> T) async throws -> 
       #expect(try await KeyFile.load(path) == testKey)
     }
   }
+
+  @Test func saveCreatesFolder() async throws {
+    try await withTempDir { dir in
+      let path = "\(dir)/.config/fm-ee2e/.fm-ee2e.key"
+      try await KeyFile.save(path, testKey)
+      #expect(try await KeyFile.load(path) == testKey)
+    }
+  }
 }

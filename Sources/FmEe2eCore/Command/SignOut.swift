@@ -26,9 +26,9 @@ class SignOutCommand: Command {
 
 /// 接続を切って、接続先の一覧に戻る。
 final class SshDisconnect: SignOutCommand {
-  override var title: String { "切断" }
+  override var title: String { tr("sign_out.title") }
 
-  override func message(_ c: CommandContext) -> String { "\((c.pane as! SshPane).ssh!.host) との接続を切ります。" }
+  override func message(_ c: CommandContext) -> String { tr("sign_out.confirm", ["host": (c.pane as! SshPane).ssh!.host]) }
 
   override func canSignOut(_ c: CommandContext) -> Bool { (c.pane as! SshPane).ssh != nil }
 

@@ -45,7 +45,7 @@ final class MessageDialog: Modal {
     }
   }
 
-  override var hints: [(String, String)] { [("Enter", "閉じる")] }
+  override var hints: [(String, String)] { [("Enter", tr("dialogs.hint.close"))] }
 
   override func handleKey(_ key: Key) {
     if key.name == "enter" || key.name == "escape" || key.char == " " {
@@ -94,7 +94,7 @@ final class ConfirmDialog: Modal {
     }
   }
 
-  override var hints: [(String, String)] { showHints ? [("Y", yesLabel), ("N", "キャンセル")] : [] }
+  override var hints: [(String, String)] { showHints ? [("Y", yesLabel), ("N", tr("dialogs.cancel"))] : [] }
 
   override func handleKey(_ key: Key) {
     if key.isLetter("y") || key.name == "enter" {
@@ -331,7 +331,7 @@ final class InputDialog: Modal {
       line = item
       if lines.count == Self.maxCandidateLines - 1 {
         let rest = candidates.count - i
-        lines.append(truncate("\(item)  …ほか\(rest - 1)件", width))
+        lines.append(truncate("\(item)  " + tr("dialogs.more_candidates", ["count": rest - 1]), width))
         return lines
       }
     }
@@ -365,10 +365,10 @@ final class InputDialog: Modal {
 
   override var hints: [(String, String)] {
     var list: [(String, String)] = []
-    if complete != nil { list.append(("Tab", "補完")) }
-    if !history.isEmpty { list.append(("↑↓", "履歴")) }
-    list.append(("Enter", "決定"))
-    list.append(("Esc", "キャンセル"))
+    if complete != nil { list.append(("Tab", tr("dialogs.hint.complete"))) }
+    if !history.isEmpty { list.append(("↑↓", tr("dialogs.hint.history"))) }
+    list.append(("Enter", tr("dialogs.hint.decide")))
+    list.append(("Esc", tr("dialogs.cancel")))
     return list
   }
 
@@ -454,7 +454,7 @@ final class ExecDialog: Modal {
     self.name = name
     self.directory = directory
     self.close = close
-    super.init("実行")
+    super.init(tr("dialogs.exec.title"))
   }
 
   let name: String
@@ -465,14 +465,14 @@ final class ExecDialog: Modal {
   /// 0: 入力欄、1: 実行、2: キャンセル。
   private var focus = 0
 
-  private static let buttons = ["exec", "キャンセル"]
+  private static var buttons: [String] { ["exec", tr("dialogs.cancel")] }
 
   override func bodyHeight(_ innerWidth: Int) -> Int { 5 }
 
   override func drawBody(_ screen: Screen, _ x: Int, _ y: Int, _ innerWidth: Int) {
     screen.text(x, y, truncate(name, innerWidth), background.copyWith(bold: true))
     screen.text(x, y + 1, truncateLeft("in \(directory)", innerWidth), background.copyWith(fg: Palette.muted))
-    screen.text(x, y + 2, "引数", background.copyWith(fg: Palette.muted))
+    screen.text(x, y + 2, tr("dialogs.exec.arguments"), background.copyWith(fg: Palette.muted))
     field.draw(screen, x + 5, y + 2, innerWidth - 5, focused: focus == 0)
     var col = x + innerWidth
     for i in stride(from: Self.buttons.count - 1, through: 0, by: -1) {
@@ -489,7 +489,7 @@ final class ExecDialog: Modal {
     }
   }
 
-  override var hints: [(String, String)] { [("Tab", "移動"), ("Enter", "決定"), ("Esc", "キャンセル")] }
+  override var hints: [(String, String)] { [("Tab", tr("dialogs.hint.move")), ("Enter", tr("dialogs.hint.decide")), ("Esc", tr("dialogs.cancel"))] }
 
   override func handleKey(_ key: Key) {
     switch key.name {
@@ -521,7 +521,7 @@ final class ModeDialog: Modal {
     self.close = close
     bits = mode & 0xfff
     special = isDir ? [(0x200, "Sticky")] : [(0x800, "SUID"), (0x400, "SGID")]
-    super.init("パーミッション")
+    super.init(tr("dialogs.mode.title"))
   }
 
   let label: String
@@ -533,8 +533,10 @@ final class ModeDialog: Modal {
   private var row = 0
   private var col = 0
 
-  private static let rows = ["所有者", "グループ", "その他", "特殊"]
-  private static let cols = ["読み", "書き", "実行"]
+  private static var rows: [String] {
+    [tr("dialogs.mode.owner"), tr("dialogs.mode.group"), tr("dialogs.mode.other"), tr("dialogs.mode.special")]
+  }
+  private static var cols: [String] { [tr("dialogs.mode.read"), tr("dialogs.mode.write"), tr("dialogs.mode.execute")] }
   private static let labelWidth = 10
 
   private func bit(_ row: Int, _ col: Int) -> Int { row == 3 ? special[col].0 : 1 << (8 - row * 3 - col) }
@@ -590,7 +592,7 @@ final class ModeDialog: Modal {
     screen.text(x + Self.labelWidth + 3 * 7, y + 4, "\(octal)  \(Self.symbolic(bits))", background.copyWith(fg: Palette.text, bold: true))
   }
 
-  override var hints: [(String, String)] { [("←↑↓→", "移動"), ("Space", "切替"), ("Enter", "適用"), ("Esc", "キャンセル")] }
+  override var hints: [(String, String)] { [("←↑↓→", tr("dialogs.hint.move")), ("Space", tr("dialogs.hint.toggle")), ("Enter", tr("dialogs.hint.apply")), ("Esc", tr("dialogs.cancel"))] }
 
   override func handleKey(_ key: Key) {
     switch key.name {
@@ -696,10 +698,10 @@ final class ChoiceDialog: Modal {
   }
 
   override var hints: [(String, String)] {
-    var list: [(String, String)] = [("↑↓", "選択")]
-    if pages > 1 { list.append(("←→", "ページ")) }
-    list.append(("Enter", "決定"))
-    list.append(("Esc", "キャンセル"))
+    var list: [(String, String)] = [("↑↓", tr("dialogs.hint.select"))]
+    if pages > 1 { list.append(("←→", tr("dialogs.hint.page"))) }
+    list.append(("Enter", tr("dialogs.hint.decide")))
+    list.append(("Esc", tr("dialogs.cancel")))
     return list
   }
 
@@ -758,10 +760,10 @@ final class ProgressDialog: Modal {
   init(_ message: String, onEscape: (() -> Void)? = nil) {
     self.message = message
     self.onEscape = onEscape
-    super.init("お待ちください", accent: Palette.green)
+    super.init(tr("dialogs.progress_title"), accent: Palette.green)
   }
 
-  /// Esc を押したとき（待つのをやめる）。nil なら Esc は効かない。
+  /// Esc を押したとき（中断）。nil なら Esc は効かない。
   let onEscape: (() -> Void)?
 
   /// 出している文言。処理の途中で変えてよい（[withProgress] の update）。
@@ -775,7 +777,7 @@ final class ProgressDialog: Modal {
     screen.text(x, y, message, background)
   }
 
-  override var hints: [(String, String)] { onEscape == nil ? [] : [("Esc", "待つのをやめる")] }
+  override var hints: [(String, String)] { onEscape == nil ? [] : [("Esc", tr("dialogs.hint.abort"))] }
 
   override func handleKey(_ key: Key) {
     if key.name == "escape" {
@@ -792,10 +794,10 @@ extension App {
   /// エラーを出す。文言（String）でも Error でもよい。
   func showError(_ error: Any) async {
     let message = (error as? any Error).map(errorMessage) ?? "\(error)"
-    await showModal { (close: @escaping (()) -> Void) in MessageDialog("エラー", message, close, accent: Palette.error) }
+    await showModal { (close: @escaping (()) -> Void) in MessageDialog(tr("dialogs.error_title"), message, close, accent: Palette.error) }
   }
 
-  func confirm(_ title: String, _ message: String, yes: String = "はい", maxWidth: Int = 68, showHints: Bool = true) async -> Bool {
+  func confirm(_ title: String, _ message: String, yes: String = tr("dialogs.yes"), maxWidth: Int = 68, showHints: Bool = true) async -> Bool {
     await showModal { close in ConfirmDialog(title, message, yes, close, maxWidth: maxWidth, showHints: showHints) }
   }
 

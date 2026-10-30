@@ -44,7 +44,7 @@ final class GitEdit: EditCommand {
       let isDir = try await ssh.isDirectory(path)
       let missing = isDir ? false : !(try await ssh.exists(path))
       if isDir || missing {
-        await c.app.showError(isDir ? "フォルダーはエディタで開けません。" : "ファイルがありません（消したファイルです）。")
+        await c.app.showError(isDir ? tr("edit.is_folder") : tr("edit.missing"))
         return
       }
       _ = await runInTerminal(
@@ -60,7 +60,7 @@ final class GitEdit: EditCommand {
     var isDir: ObjCBool = false
     let exists = FileManager.default.fileExists(atPath: path, isDirectory: &isDir)
     if !exists || isDir.boolValue {
-      await c.app.showError(exists && isDir.boolValue ? "フォルダーはエディタで開けません。" : "ファイルがありません（消したファイルです）。")
+      await c.app.showError(exists && isDir.boolValue ? tr("edit.is_folder") : tr("edit.missing"))
       return
     }
     await editInTerminal(c.app, path, workingDirectory: folder)

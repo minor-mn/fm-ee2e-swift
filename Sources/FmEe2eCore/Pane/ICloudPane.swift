@@ -37,6 +37,8 @@ final class ICloudPane: LocalPane {
   /// 右に iCloud Drive を出しているとき、左のタブで G・F12 を押すと、左のローカルからアップロードする。
   override var transferCommand: Command? { ICloudUpload() }
 
+  override var canClip: Bool { state == .ready && super.canClip }
+
   override var title: String { "iCloud Drive" }
 
   /// iCloud Drive からの位置。
@@ -48,13 +50,17 @@ final class ICloudPane: LocalPane {
     return relative == "." ? title : "\(title) / \(p.split(relative).joined(separator: " / "))"
   }
 
-  override var accent: Rgb { Palette.lime }
+  override var accent: Rgb { colors.accent ?? colors.lime }
+
+  override var selection: Rgb { colors.selection ?? colors.limeDark }
+
+  override var themeKey: ThemeKey { .icloud }
 
   override var placeholder: [String]? {
     switch state {
-    case .checking: ["確認中…"]
-    case .notAvailable: ["iCloud Driveは使えません。", "この Mac のシステム設定で iCloud Drive をオンにしてください。"]
-    case .unreadable: ["iCloud Driveのフォルダーを読めません。", ""] + (problem.map { [$0] } ?? []) + ["", "直したら L で確かめ直します。"]
+    case .checking: [tr("icloud_pane.placeholder.checking")]
+    case .notAvailable: [tr("icloud_pane.placeholder.not_available"), tr("icloud_pane.placeholder.not_available_hint")]
+    case .unreadable: [tr("icloud_pane.placeholder.unreadable"), ""] + (problem.map { [$0] } ?? []) + ["", tr("icloud_pane.placeholder.retry_hint")]
     case .ready: nil
     }
   }
@@ -98,7 +104,15 @@ final class ICloudPane: LocalPane {
 
   override func fetch() async throws -> [Entry] { state == .ready ? try await super.fetch() : [] }
 
-  override func fetchUsage() async throws -> DiskUsage? { state == .ready ? try await super.fetchUsage() : nil }
+  /// 容量は、開いているフォルダーの中身の大きさ（Used）だけを出す。df ではこの Mac の容量になり、iCloud の容量は分からない。
+  /// 設定ファイルの show_used が false なら、何も出さない（数えもしない）。
+  override var usageLabels: [String] { showsUsed ? ["Used"] : [] }
+
+  private var showsUsed: Bool { Appearance.current.theme(themeKey).showUsed }
+
+  override func fetchUsage() async throws -> DiskUsage? {
+    state == .ready && !inArchive && showsUsed ? DiskUsage(used: await apparentSize(dir)) : nil
+  }
 
   override var canGoUp: Bool { inArchive || (state == .ready && dir != Self.root) }
 

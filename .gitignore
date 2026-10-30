@@ -10,6 +10,9 @@ google_credentials.json
 rclone.conf
 client_secret*.json
 
+# Claude Code の作業用
+.claude/
+
 # ダウンロード途中の一時ファイル
 *.fm-ee2e-partial
 

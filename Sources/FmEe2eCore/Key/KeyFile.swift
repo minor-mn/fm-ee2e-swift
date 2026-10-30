@@ -25,13 +25,13 @@ enum KeyFile {
     let blank = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "\u{FEFF}"))
     let lines = text.components(separatedBy: "\n").map { $0.trimmingCharacters(in: blank) }.filter { !$0.isEmpty }
     if lines.count != 2 || lines[0] != header {
-      throw AppError("鍵の形式ではありません。1行目が \(header) である必要があります。")
+      throw AppError(tr("key_file.bad_format", ["header": header]))
     }
     guard let key = decodeBase64(lines[1], requirePadding: true) else {
-      throw AppError("鍵の2行目がBase64として読めません。")
+      throw AppError(tr("key_file.bad_base64"))
     }
     if key.count != keyLength {
-      throw AppError("鍵の長さが\(keyLength)バイトではありません（\(key.count)バイト）。")
+      throw AppError(tr("key_file.bad_length", ["expected": keyLength, "actual": key.count]))
     }
     return key
   }
@@ -45,9 +45,10 @@ enum KeyFile {
     return try decode(String(contentsOfFile: file, encoding: .utf8))
   }
 
-  /// 鍵ファイルを新規作成する。既にファイルがある場合は上書きせずに失敗する。
+  /// 鍵ファイルを新規作成する。既にファイルがある場合は上書きせずに失敗する。置くフォルダーがなければ作る。
   static func save(_ file: String, _ key: Data) async throws {
     let text = encode(key)
+    try FileManager.default.createDirectory(atPath: p.dirname(file), withIntermediateDirectories: true)
     // 中身を書く前にパーミッションを絞る。
     let fd = Darwin.open(file, O_WRONLY | O_CREAT | O_EXCL | O_CLOEXEC, 0o600)
     if fd < 0 {
@@ -56,7 +57,7 @@ enum KeyFile {
     let handle = FileHandle(fileDescriptor: fd, closeOnDealloc: true)
     do {
       if fchmod(fd, 0o600) != 0 {
-        throw AppError("パーミッションを設定できません: \(String(cString: strerror(errno)))")
+        throw AppError(tr("key_file.cannot_set_permission", ["reason": String(cString: strerror(errno))]))
       }
       try handle.write(contentsOf: Data(text.utf8))
       try handle.synchronize()

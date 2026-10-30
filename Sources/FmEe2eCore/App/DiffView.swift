@@ -7,8 +7,11 @@ final class DiffView: Modal {
     self.pages = pages
     self.close = close
     self.page = min(max(page, 0), pages.count - 1)
-    super.init("git diff", accent: Palette.orange)
+    super.init("git diff", accent: Appearance.current.theme(.git).colors.accent(or: \.orange))
   }
+
+  /// git のタブの見た目で描く。
+  override var themeKey: ThemeKey { .git }
 
   let pages: [DiffPage]
   let close: (()) -> Void
@@ -20,9 +23,9 @@ final class DiffView: Modal {
   override var frame: ModalFrame { .page }
 
   override var hints: [(String, String)] {
-    [("↑↓ PgUp PgDn", "スクロール"), ("n / p", "次 / 前の変更")]
-      + (pages.count > 1 ? [("← →", "前後のファイル")] : [])
-      + [("Esc / q", "戻る")]
+    [("↑↓ PgUp PgDn", tr("diff_view.hints.scroll")), ("n / p", tr("diff_view.hints.next_prev"))]
+      + (pages.count > 1 ? [("← →", tr("diff_view.hints.files"))] : [])
+      + [("Esc / q", tr("diff_view.hints.back"))]
   }
 
   override func drawBody(_ screen: Screen, _ x: Int, _ y: Int, _ width: Int) {
@@ -33,10 +36,10 @@ final class DiffView: Modal {
         x + 2,
         y + 1,
         file.binary
-          ? "バイナリファイルのため、中身の差分は表示できません。"
+          ? tr("diff_view.binary")
           : pages[page].section == "untracked"
-          ? "空のファイルです。"
-          : "中身の差分はありません（権限の変更などだけです）。",
+          ? tr("diff_view.empty_file")
+          : tr("diff_view.no_content_diff"),
         background.copyWith(fg: Palette.muted)
       )
     }
@@ -65,12 +68,12 @@ final class DiffView: Modal {
       x,
       y,
       truncateLeft(name, max(1, end - x - textWidth(tail))),
-      bar.copyWith(fg: Palette.orange, bold: true)
+      bar.copyWith(fg: accent, bold: true)
     )
     x += screen.text(x, y, "  ", bar)
-    x += screen.text(x, y, "+\(page.file.added)", bar.copyWith(fg: Palette.green, bold: true))
+    x += screen.text(x, y, "+\(page.file.added)", bar.copyWith(fg: Palette.diffAdded, bold: true))
     x += screen.text(x, y, " ", bar)
-    x += screen.text(x, y, "-\(page.file.removed)", bar.copyWith(fg: Palette.red, bold: true))
+    x += screen.text(x, y, "-\(page.file.removed)", bar.copyWith(fg: Palette.diffRemoved, bold: true))
     screen.text(x + 2, y, page.section, bar.copyWith(fg: Palette.muted))
   }
 
@@ -79,7 +82,7 @@ final class DiffView: Modal {
       // 変更の固まりの区切り。git の @@ の行の代わりに、行番号と、git が添える関数名などを出す。
       let style = Style(fg: Palette.muted, bg: Palette.surface)
       screen.fill(0, y, w, 1, style)
-      let where_ = "⋯ \(line.newNumber ?? 0)行目から"
+      let where_ = tr("diff_view.hunk_from", ["line": line.newNumber ?? 0])
       let x = 1 + screen.text(1, y, where_, style.copyWith(bold: true))
       if !line.text.isEmpty {
         screen.text(x + 2, y, truncate(DiffView.plain(line.text), max(0, w - x - 3)), style)
@@ -103,7 +106,7 @@ final class DiffView: Modal {
       screen.text(x + 2, y, truncate(line.text, max(0, w - x - 3)), numbers)
       return
     }
-    x += screen.text(x, y, sign, style.copyWith(fg: sign == "+" ? Palette.green : Palette.red, bold: true)) + 1
+    x += screen.text(x, y, sign, style.copyWith(fg: sign == "+" ? Palette.diffAdded : Palette.diffRemoved, bold: true)) + 1
     screen.text(x, y, truncate(DiffView.plain(line.text), max(0, w - x - 1)), style)
   }
 

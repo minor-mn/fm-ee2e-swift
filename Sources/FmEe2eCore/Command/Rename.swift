@@ -26,7 +26,7 @@ class RenameCommand: Command {
       return
     }
     // 拡張子の前までを選択した状態で開く。
-    let name = await askName(c.app, "名前を変更", initial: current, selectStem: true, existing: existing)
+    let name = await askName(c.app, tr("rename.title"), initial: current, selectStem: true, existing: existing)
     if name == current {
       return
     }

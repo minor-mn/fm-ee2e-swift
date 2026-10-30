@@ -26,6 +26,9 @@ class Modal: View {
 
   var frame: ModalFrame { .dialog }
 
+  /// この画面の見た目。窓全体と違えば、その見た目（GUI 版では文字の大きさも）で描く。
+  var themeKey: ThemeKey { .window }
+
   /// 見出しの色。
   var titleColor: Rgb { accent }
 
@@ -39,7 +42,7 @@ class Modal: View {
   }
 
   /// [ModalFrame.page] の上下の帯の地。
-  static let bar = Style(bg: Palette.surfaceHigh)
+  static var bar: Style { Style(bg: Palette.surfaceHigh) }
 
   /// 下に出すキーの案内。
   var hints: [(String, String)] { [] }
@@ -67,6 +70,14 @@ class Modal: View {
   func handleKey(_ key: Key) {}
 
   func draw(_ screen: Screen) {
+    if themeKey == .window {
+      drawFrame(screen)
+    } else {
+      screen.layer(0, 0, screen.width, screen.height, theme: themeKey) { drawFrame($0) }
+    }
+  }
+
+  private func drawFrame(_ screen: Screen) {
     switch frame {
     case .dialog:
       let w = max(20, preferredWidth(screen))

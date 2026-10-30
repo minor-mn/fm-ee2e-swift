@@ -1,15 +1,29 @@
 final class ShellCell {
-  init(_ text: String = " ", _ style: Style = Style()) {
+  init(_ text: String = " ", _ style: Style = ShellTerminal.plain) {
     self.text = text
     self.style = style
   }
 
   var text: String
   var style: Style
+
+  /// 行の最後のセルで、端で折り返して次の行に続いている（コピーするときに改行を入れない）。
+  var continues = false
 }
 
 /// 枠の中で動かすプログラムの出力をセルに解釈する。制御文字を外側の端末へ直接書かない。
 final class ShellTerminal {
+  /// 既定の書式。色は描くときに、描いている範囲の文字色・地の色にする（[resolved]）。
+  static let plain = Style(fg: .defaultForeground, bg: .defaultBackground)
+
+  /// [style] の既定の色を、描いている範囲の見た目（[Theme.active]）の色にする。
+  static func resolved(_ style: Style) -> Style {
+    func color(_ c: Rgb) -> Rgb {
+      c == .defaultForeground ? Palette.text : c == .defaultBackground ? Palette.background : c
+    }
+    return style.copyWith(fg: color(style.fg), bg: color(style.bg))
+  }
+
   init(_ columns: Int, _ rows: Int) {
     self.columns = columns
     self.rows = rows
@@ -37,7 +51,7 @@ final class ShellTerminal {
   var applicationCursor = false
   var bracketedPaste = false
   private var inverse = false
-  private var style = Style()
+  private var style = ShellTerminal.plain
   private var state = ""
   private var sequence = ""
 
@@ -209,6 +223,7 @@ final class ShellTerminal {
     }
     if wrap || (width == 2 && x == columns - 1) {
       if autoWrap {
+        grid[y][columns - 1].continues = true
         x = 0
         lineFeed()
       }
@@ -468,7 +483,7 @@ final class ShellTerminal {
     y = 0
     top = 0
     bottom = rows - 1
-    style = Style()
+    style = ShellTerminal.plain
     inverse = false
     origin = false
     insert = false
@@ -486,7 +501,7 @@ final class ShellTerminal {
       switch code {
       case 0:
         // 色などを戻しても、リンクは OSC 8 で終えるまで続く。
-        style = Style().withLink(style.link)
+        style = ShellTerminal.plain.withLink(style.link)
         inverse = false
       case 1:
         style = style.copyWith(bold: true)
@@ -501,9 +516,9 @@ final class ShellTerminal {
       case 27:
         inverse = false
       case 39:
-        style = style.copyWith(fg: Palette.text)
+        style = style.copyWith(fg: .defaultForeground)
       case 49:
-        style = style.copyWith(bg: Palette.background)
+        style = style.copyWith(bg: .defaultBackground)
       case 38, 48:
         var color: Rgb?
         if i + 2 < values.count && values[i + 1] == 5 {

@@ -45,7 +45,7 @@ final class RemoteArchive {
     case "unzip": tool = .unzip
     default:
       throw SshException(
-        zip ? "\(ssh.host) に bsdtar も unzip もないので、zip を扱えません。" : "\(ssh.host) に tar がないので、tar.gz・tar.xz を扱えません。"
+        zip ? tr("remote_archive.no_unzip", ["host": ssh.host]) : tr("remote_archive.no_tar", ["host": ssh.host])
       )
     }
     let archive = shQuote(path)
@@ -87,7 +87,7 @@ final class RemoteArchive {
   /// [item] を接続先の [dest] フォルダーに取り出し、取り出したファイルのパスを返す。
   func extract(_ item: ArchiveItem, _ dest: String) async throws -> String {
     guard let raw = item.raw else {
-      throw SshException("「\(item.path)」は取り出せません。")
+      throw SshException(tr("remote_archive.cannot_extract", ["path": item.path]))
     }
     let archive = shQuote(path)
     let to = shQuote(dest)

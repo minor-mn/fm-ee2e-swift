@@ -47,6 +47,8 @@ final class DrivePane: PathPane {
       ]
   }
 
+  override var canClip: Bool { state == .ready }
+
   /// C・M で選んだ項目は、Google Drive の中にだけ貼り付ける。
   override func makeClip(_ targets: [Mark], move: Bool) -> Clip? {
     DriveClip(targets.map { (path: pathOfMark($0), name: $0.entry.name, isDir: $0.entry.isDir) }, move: move)
@@ -59,15 +61,15 @@ final class DrivePane: PathPane {
     let problemLines = problem.map { [$0] } ?? []
     switch state {
     case .checking:
-      return ["確認中…"]
+      return [tr("drive_pane.placeholder.checking")]
     case .notInstalled:
-      return ["Google ドライブ for デスクトップをインストールしてください", "https://ipv4.google.com/intl/ja/drive/download/"]
+      return [tr("drive_pane.placeholder.not_installed"), "https://ipv4.google.com/intl/ja/drive/download/"]
     case .noKey:
-      return ["鍵ファイルがありません（\(keyFile)）。", "", "Enter: 鍵を用意する（新しく生成・既存の鍵をペースト）"]
+      return [tr("drive_pane.placeholder.no_key", ["key_file": keyFile]), "", tr("drive_pane.placeholder.no_key_hint")]
     case .badKey:
-      return ["鍵ファイルを読み込めません。", keyFile, ""] + problemLines + ["", "直したら L で確かめ直します。"]
+      return [tr("drive_pane.placeholder.bad_key"), keyFile, ""] + problemLines + ["", tr("drive_pane.placeholder.retry_hint")]
     case .unavailable:
-      return ["Google Driveを使えません。", ""] + problemLines + ["", "直したら L で確かめ直します。"]
+      return [tr("drive_pane.placeholder.unavailable"), ""] + problemLines + ["", tr("drive_pane.placeholder.retry_hint")]
     case .ready:
       return nil
     }
@@ -172,7 +174,7 @@ final class DrivePane: PathPane {
     }
     var cancelled = false
     if !toEvict.isEmpty {
-      let message = "Google Drive にアップロード中…"
+      let message = tr("drive_pane.uploading")
       await app.withUpdatingProgress(message, onEscape: { cancelled = true }) { update in
         while !cancelled {
           // 上がり終えたものは手元から外せるので、外せなくなるまで（残りがなくなるまで）待つ。
@@ -180,7 +182,7 @@ final class DrivePane: PathPane {
           if toEvict.isEmpty {
             break
           }
-          update("\(message)（残り \(toEvict.count) 件）")
+          update(tr("drive_pane.uploading_remaining", ["count": toEvict.count]))
           await delay(milliseconds: 2000)
         }
       }
@@ -231,9 +233,11 @@ final class DrivePane: PathPane {
     names!.decrypt(name, isFolder: isFolder) ?? name
   }
 
-  override var accent: Rgb { Palette.green }
+  override var accent: Rgb { colors.accent ?? colors.green }
 
-  override var selection: Rgb { Palette.greenDark }
+  override var selection: Rgb { colors.selection ?? colors.greenDark }
+
+  override var themeKey: ThemeKey { .drive }
 
   override var fileColor: Rgb { Palette.green }
 
@@ -281,12 +285,14 @@ final class DrivePane: PathPane {
     return entries.sorted { compareEntries($0, $1) < 0 }
   }
 
+  /// 容量は、開いているフォルダーの中身の大きさ（Used）だけを出す。df ではこの Mac の容量になり、Google Drive の容量は分からない。
+  /// 設定ファイルの show_used が false なら、何も出さない（数えもしない）。
+  override var usageLabels: [String] { showsUsed ? ["Used"] : [] }
+
+  private var showsUsed: Bool { Appearance.current.theme(themeKey).showUsed }
+
   override func fetchUsage() async throws -> DiskUsage? {
-    if state != .ready {
-      return nil
-    }
-    let run = try await runProcess("/bin/df", ["-Pk", dir])
-    return run.exitCode == 0 ? parseDf(run.stdout) : nil
+    state == .ready && showsUsed ? DiskUsage(used: await apparentSize(dir)) : nil
   }
 
   override var canGoUp: Bool { state == .ready && dir != root }
@@ -390,7 +396,7 @@ final class DrivePane: PathPane {
         try await moveToTrash(to)
       }
       if rename(staged, to) != 0 {
-        throw AppError("\(to) に移せません: \(String(cString: strerror(errno)))")
+        throw AppError(tr("drive_pane.cannot_move", ["path": to, "reason": String(cString: strerror(errno))]))
       }
     } catch {
       if lstatPath(staged).type != .notFound {
@@ -455,7 +461,7 @@ final class DrivePane: PathPane {
     let dir = try await createOpenTemp()
     let target = p.join(dir, name)
     do {
-      try await app.withProgress("「\(name)」を復号中…") {
+      try await app.withProgress(tr("drive_pane.decrypting", ["name": name])) {
         try await format!.decrypt(from: path, to: target, key: key!)
       }
     } catch {
@@ -476,7 +482,7 @@ final class DrivePane: PathPane {
 func makeTempDir(_ prefix: String, in parent: String = NSTemporaryDirectory()) throws -> String {
   var template = Array(p.join(parent, "\(prefix)XXXXXX").utf8CString)
   guard mkdtemp(&template) != nil else {
-    throw AppError("一時フォルダーを作れません: \(String(cString: strerror(errno)))")
+    throw AppError(tr("drive_pane.cannot_make_temp", ["reason": String(cString: strerror(errno))]))
   }
   return String(cString: template)
 }

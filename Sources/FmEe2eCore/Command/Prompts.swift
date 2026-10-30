@@ -5,7 +5,7 @@ final class ConflictDialog: Modal {
   init(_ path: String, _ close: @escaping (ConflictDecision?) -> Void) {
     self.path = path
     self.close = close
-    super.init("同じ名前のファイル・フォルダーがあります", accent: Palette.lime)
+    super.init(tr("prompts.conflict.title"), accent: Palette.lime)
   }
 
   let path: String
@@ -23,18 +23,18 @@ final class ConflictDialog: Modal {
     screen.text(
       x,
       y + lines.count + 1,
-      "[\(applyToAll ? "x" : " ")] 残りすべてに適用",
+      "[\(applyToAll ? "x" : " ")] " + tr("prompts.conflict.apply_to_rest"),
       bg.copyWith(fg: applyToAll ? Palette.lime : Palette.muted)
     )
   }
 
   override var hints: [(String, String)] {
     [
-      ("O", "上書き"),
-      ("N", "別名で保存"),
-      ("S", "スキップ"),
-      ("A", "すべてに適用"),
-      ("Esc", "中止"),
+      ("O", tr("prompts.conflict.overwrite")),
+      ("N", tr("prompts.conflict.rename")),
+      ("S", tr("prompts.conflict.skip")),
+      ("A", tr("prompts.conflict.apply_to_all")),
+      ("Esc", tr("prompts.conflict.cancel")),
     ]
   }
 
@@ -74,10 +74,10 @@ func askName(
     validate: { value in
       let name = value.trimmingCharacters(in: .whitespacesAndNewlines)
       if name.contains("/") {
-        return "「/」は使えません。"
+        return tr("prompts.name.slash")
       }
       if existing.contains(name) {
-        return "同じ名前があります。"
+        return tr("prompts.name.exists")
       }
       return nil
     }

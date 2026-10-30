@@ -102,9 +102,9 @@ final class DriveEditSession {
     var replaced: String? = current == nil ? nil : source
     if current != cipherHash {
       let choice = await app.askChoice(
-        "Google Drive のファイルが変わっています",
-        ["上書きする", "別の名前で保存する", "保存しない"],
-        note: current == nil ? "「\(name)」は開いたあとに Google Drive から消えています。" : "「\(name)」は開いたあとに Google Drive で変わっています。"
+        tr("drive_edit.changed.title"),
+        [tr("drive_edit.changed.overwrite"), tr("drive_edit.changed.save_as"), tr("drive_edit.changed.dont_save")],
+        note: current == nil ? tr("drive_edit.changed.note_deleted", ["name": name]) : tr("drive_edit.changed.note_modified", ["name": name])
       )
       switch choice {
       case 0:
@@ -119,7 +119,7 @@ final class DriveEditSession {
         return nil
       }
     }
-    try await app.withProgress("「\(target)」を暗号化中…") {
+    try await app.withProgress(tr("drive_edit.encrypting", ["name": target])) {
       let to = try await drive.encryptedPath(parent, target, isFolder: false)
       try await drive.encryptFile(plainPath, to)
       // 新しいものを置き終えてから、上書きされる側をゴミ箱に移す。
@@ -139,7 +139,7 @@ final class DriveEditSession {
 
   private static func hashOf(_ path: String) throws -> String {
     guard let handle = FileHandle(forReadingAtPath: path) else {
-      throw AppError("\(path) を開けません。")
+      throw AppError(tr("drive_edit.cannot_open", ["path": path]))
     }
     defer {
       try? handle.close()
@@ -155,14 +155,14 @@ final class DriveEditSession {
 /// [source] を復号してエディタで開き、閉じたら保存する。
 func editOnDrive(_ drive: DrivePane, _ source: String, _ name: String) async throws {
   let app = drive.app
-  let session = try await app.withProgress("「\(name)」を復号中…") { try await DriveEditSession.start(drive, source, name) }
+  let session = try await app.withProgress(tr("drive_edit.decrypting", ["name": name])) { try await DriveEditSession.start(drive, source, name) }
   await editInTerminal(app, session.plainPath, workingDirectory: session.dir)
   var saved: String?
   do {
     saved = try await session.save(drive)
   } catch {
     // 平文は残す（次に起動したときに聞く）。
-    await app.showError("保存できませんでした。編集した内容は次に起動したときに保存できます。\n\(errorMessage(error))")
+    await app.showError(tr("drive_edit.save_failed_kept", ["message": errorMessage(error)]))
   }
   await drive.load(focus: saved ?? name)
 }
@@ -172,9 +172,9 @@ func recoverEdits(_ drive: DrivePane) async {
   let app = drive.app
   for session in await DriveEditSession.leftovers() {
     let choice = await app.askChoice(
-      "保存されていない編集があります",
-      ["Google Drive に保存する", "捨てる"],
-      note: "「\(session.name)」を編集したまま、Google Drive に保存されていません。"
+      tr("drive_edit.recover.title"),
+      [tr("drive_edit.recover.save"), tr("drive_edit.recover.discard")],
+      note: tr("drive_edit.recover.note", ["name": session.name])
     )
     do {
       switch choice {
@@ -186,7 +186,7 @@ func recoverEdits(_ drive: DrivePane) async {
         break
       }
     } catch {
-      await app.showError("保存できませんでした。\n\(errorMessage(error))")
+      await app.showError(tr("drive_edit.save_failed", ["message": errorMessage(error)]))
     }
   }
   await drive.load()

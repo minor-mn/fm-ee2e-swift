@@ -5,19 +5,24 @@
 func drawHeader(_ screen: Screen) {
   let bg = Style()
   screen.box(0, 0, screen.width, 4, bg.copyWith(fg: Palette.outline))
-  let titleEnd = 3 + screen.gradientText(3, 0, "fm-ee2e-TUI", [Palette.purple, Palette.green], bg.copyWith(bold: true))
+  let titleEnd = 3 + screen.gradientText(3, 0, "fm-ee2e-swift", [Palette.purple, Palette.green], bg.copyWith(bold: true))
   screen.text(2, 0, " ", bg)
   screen.text(titleEnd, 0, " ", bg)
 }
 
-/// [pane] のドライブの Total / Used / Free。
+/// [pane] のドライブの Total / Used / Free。[Pane.headerText] があれば、その代わりにそれを出す（git のリポジトリ名など）。
 func drawUsage(_ screen: Screen, _ y: Int, _ pane: Pane) {
   let bg = Style()
   let usage = pane.usage
   var x = 2
   x += screen.text(x, y, pane.title, bg.copyWith(fg: pane.accent, bold: true))
+  if let text = pane.headerText {
+    screen.text(x + 3, y, truncate(text, max(0, screen.width - x - 5)), bg.copyWith(fg: Palette.muted, bold: true))
+    return
+  }
   func bytes(_ value: Int?) -> String { value.map(formatBytes) ?? "—" }
-  for (label, value) in [("Total", bytes(usage?.total)), ("Used", bytes(usage?.used)), ("Free", bytes(usage?.free))] {
+  let all = [("Total", bytes(usage?.total)), ("Used", bytes(usage?.used)), ("Free", bytes(usage?.free))]
+  for (label, value) in all where pane.usageLabels.contains(label) {
     x += 3
     x += screen.text(x, y, label, bg.copyWith(fg: Palette.muted))
     x += screen.text(x + 1, y, value, bg) + 1
@@ -42,9 +47,9 @@ func drawMarks(_ screen: Screen, _ y: Int, _ pane: Pane, _ side: String) {
   let marks = pane.marks.values
   let bytes = marks.reduce(0) { $0 + ($1.entry.size ?? 0) }
   let elsewhere = pane.marksElsewhere
-  var parts = ["\(side): \(marks.count)項目マーク（ファイル計 \(formatBytes(bytes))）"]
+  var parts = [tr("status_bars.marks", ["side": side, "count": marks.count, "size": formatBytes(bytes)])]
   if elsewhere > 0 {
-    parts.append("うち開いていないフォルダーに \(elsewhere)項目")
+    parts.append(tr("status_bars.marks_elsewhere", ["count": elsewhere]))
   }
   screen.text(1, y, truncate(parts.joined(separator: "  "), screen.width - 2), Style(fg: Palette.lime, bold: true))
 }
@@ -78,8 +83,8 @@ let functionKeys: [(String, String)?] = [
   nil,
 ]
 
-/// FD のように、最下段に F1〜F12 の機能を、キーボードと同じく4つずつの組にして並べる。
-func drawFunctionKeys(_ screen: Screen, _ y: Int, _ f12: (String, String)) {
+/// FD のように、最下段に F1〜F12 の機能（[keys]、nil は空き）を、キーボードと同じく4つずつの組にして並べる。
+func drawFunctionKeys(_ screen: Screen, _ y: Int, _ keys: [(String, String)?]) {
   // 組の間は2桁、キーの間は1桁空ける。
   let slot = (screen.width - 2 * 2 - 9) / 12
   if slot < 2 {
@@ -89,7 +94,6 @@ func drawFunctionKeys(_ screen: Screen, _ y: Int, _ f12: (String, String)) {
   // ヘルプを兼ねて、同じ動きの文字キーに当たる文字を緑の強い黄緑の地にする。
   let keyStyle = Style(fg: Palette.background, bg: Palette.yellowGreen, bold: true)
   var x = (screen.width - (slot * 12 + 2 * 2 + 9)) / 2
-  let keys = functionKeys + [f12]
   for i in 0..<keys.count {
     if i > 0 {
       x += i % 4 == 0 ? 2 : 1

@@ -1,6 +1,6 @@
 /// FD風の2画面。左はローカル・SSH の接続先（Shift+Tab で切り替える）、
 /// 右は Google Drive・git status・SSH の接続先・iCloud Drive・ローカル（Tab で切り替える）。
-/// 右の窓に出すタブは設定ファイル（[AppConfig]）で選び、off のタブは使わない（確かめもしない）。
+/// 右の窓に出すタブは設定ファイル（[AppConfig]）で選び、false のタブは使わない（確かめもしない）。
 /// 左の SSH は、右の SSH のタブが on のときだけ使える。
 final class MainView: View, Workspace {
   init(_ app: App, config: AppConfig = AppConfig()) {
@@ -12,8 +12,8 @@ final class MainView: View, Workspace {
     drive = DrivePane(app)
     ssh = SshPane(app)
     sshLeft = SshPane(app)
-    noTab = NoTabPane(app, ["右の窓に出すタブがありません。", "~/.config/fm-ee2e/config.yml の right_tabs で on にしてください。"])
-    gitChecking = NoTabPane(app, ["確認中…"])
+    noTab = NoTabPane(app, ["main_view.no_tab.title", "main_view.no_tab.hint"])
+    gitChecking = NoTabPane(app, ["main_view.git_checking"])
     rightMode = Self.startMode(config)
     preview = PreviewOverlay(app)
     // 左の SSH を切る（別の接続先につなぎ直すときを含む）前に、それを経由する右の SSH を切る。
@@ -23,12 +23,19 @@ final class MainView: View, Workspace {
       }
     }
     Task { await local.load() }
-    let driveChecked = Task { if uses(.drive) { await drive.check() } }
-    if uses(.ssh) { Task { await ssh.load() } }
-    if uses(.icloud) { Task { await icloud.check() } }
-    if uses(.local) { Task { await localRight.load() } }
+    let (driveChecked, gitFound) = startTabs(config.rightTabs)
+    Task { await chooseStartRight(driveChecked, gitFound) }
+  }
+
+  /// 右の窓のタブ [modes] を使い始める（確かめ・読み込み）。Google Drive と git の確かめの Task を返す。
+  @discardableResult
+  private func startTabs(_ modes: [RightMode]) -> (Task<Void, Never>, Task<Void, Never>) {
+    let driveChecked = Task { if modes.contains(.drive) { await drive.check() } }
+    if modes.contains(.ssh) { Task { await ssh.load() } }
+    if modes.contains(.icloud) { Task { await icloud.check() } }
+    if modes.contains(.local) { Task { await localRight.load() } }
     let gitFound = Task {
-      if uses(.git) {
+      if modes.contains(.git) && gitPane == nil {
         let found = (try? await Git.locate()) ?? nil
         gitLocated = true
         if let found {
@@ -37,13 +44,28 @@ final class MainView: View, Workspace {
         app.requestRender()
       }
     }
-    Task { await chooseStartRight(driveChecked, gitFound) }
+    return (driveChecked, gitFound)
+  }
+
+  /// 読み直した設定ファイル [next] を反映する。新しく使うタブは使い始め、右の窓のタブが使えなくなっていれば切り替える。
+  func apply(_ next: AppConfig) {
+    let added = next.rightTabs.filter { !config.rightTabs.contains($0) }
+    config = next
+    startTabs(added)
+    let modes = rightModes
+    if !modes.contains(rightMode), let first = modes.first {
+      rightMode = modes.contains(.local) ? .local : first
+      if showGit {
+        Task { await showGitPane() }
+      }
+    }
+    app.requestRender()
   }
 
   /// 設定ファイルの内容。
-  let config: AppConfig
+  private(set) var config: AppConfig
 
-  /// 右の窓に [mode] のタブを出すか（設定ファイルで on か）。
+  /// 右の窓に [mode] のタブを出すか（設定ファイルで true か）。
   private func uses(_ mode: RightMode) -> Bool { config.rightTabs.contains(mode) }
 
   /// Tab で切り替える右の窓のタブ。git は見つかったときだけ。左が SSH のときは、ローカル・git・SSH だけ。
@@ -85,7 +107,7 @@ final class MainView: View, Workspace {
     switch (leftMode, sshLeft.ssh) {
     case (.local, _): await gitPane!.show(local.dir)
     case (.ssh, let remote?): await gitPane!.showRemote(remote, sshLeft.dir)
-    case (.ssh, nil): await gitPane!.showNotice(["左の SSH で接続先を選んでください。"])
+    case (.ssh, nil): await gitPane!.showNotice([tr("main_view.choose_left_ssh")])
     }
   }
 
@@ -160,46 +182,56 @@ final class MainView: View, Workspace {
     let w = screen.width
     let h = screen.height
     if w < 40 || h < 15 {
-      screen.text(0, 0, "端末が小さすぎます", Style(fg: Palette.error))
+      screen.text(0, 0, tr("main_view.terminal_too_small"), Style(fg: Palette.error))
       return
     }
     // 上は枠で囲んだ4行（タイトル入りの線、容量、所有者、下の線）。
-    drawHeader(screen)
-    drawUsage(screen, 1, active)
-    drawOwnership(screen, 2, active)
+    // 上の帯は、枠の中だけに背景（appearance.window.header）を塗れるよう、重ねた画面に描く。
+    screen.layer(0, 0, w, 4, theme: .window, framed: true, fill: Theme.active.colors.header) { s in
+      drawHeader(s)
+      drawUsage(s, 1, active)
+      drawOwnership(s, 2, active)
+    }
     let leftWidth = w / 2
     // 下から、ファンクションキー、空白、案内、マークの4行。
     let paneHeight = h - 8
-    left.draw(screen, 0, 4, leftWidth, paneHeight, focused: !rightActive, accentBorder: !rightActive)
+    app.activeTheme = active.themeKey
+    // プレビューは、選んでいる窓と反対側の窓に重ねる。
+    let target = previewTarget()
+    // 窓は、タブの見た目（GUI 版では文字の大きさも）で描く。
+    screen.layer(0, 4, leftWidth, paneHeight, theme: left.themeKey, framed: true) { s in
+      left.draw(s, 0, 0, s.width, s.height, focused: !rightActive, accentBorder: !rightActive)
+      if rightActive, let (source, entry, kind) = target {
+        preview.draw(s, source, entry, kind, 0, 0, s.width, s.height)
+      }
+    }
     // 右の窓（Google Drive・git・SSH・iCloud Drive）は、選んでいなくても色で見分けられるよう、いつも自分の色の枠にする。
-    right.draw(screen, leftWidth, 4, w - leftWidth, paneHeight, focused: rightActive, accentBorder: true)
-    if let (source, entry, kind) = previewTarget() {
-      // 選んでいる窓と反対側に重ねる。
-      if !rightActive {
-        preview.draw(screen, source, entry, kind, leftWidth, 4, w - leftWidth, paneHeight)
-      } else {
-        preview.draw(screen, source, entry, kind, 0, 4, leftWidth, paneHeight)
+    screen.layer(leftWidth, 4, w - leftWidth, paneHeight, theme: right.themeKey, framed: true) { s in
+      right.draw(s, 0, 0, s.width, s.height, focused: rightActive, accentBorder: true)
+      if !rightActive, let (source, entry, kind) = target {
+        preview.draw(s, source, entry, kind, 0, 0, s.width, s.height)
       }
     }
     if let marked = panes.first(where: { !$0.marks.isEmpty }) {
-      drawMarks(screen, h - 4, marked, marked === local || marked === sshLeft ? "左" : "右")
+      drawMarks(screen, h - 4, marked, marked === local || marked === sshLeft ? tr("main_view.side.left") : tr("main_view.side.right"))
     }
     drawInfo(screen, h - 3)
     drawFunctionKeyBar(screen, h - 1)
   }
 
-  /// 選んでいるローカルの窓（左のローカルか、右のローカル・iCloud Drive のタブ）でカーソルが画像か動画に乗っていて、
-  /// プレビューを反対側の窓に重ねられるとき、その窓と項目と種類。左で選んでいて右が SSH のときは重ねない。
-  private func previewTarget() -> (LocalPane, Entry, PreviewKind)? {
-    let source: LocalPane?
+  /// 選んでいる窓（ローカル・iCloud Drive・SSH）でカーソルが画像か動画（SSH は画像だけ）に乗っていて、
+  /// プレビューを反対側の窓に重ねられるとき、その窓と項目と種類。左のローカルで選んでいて右が SSH のときは重ねない。
+  private func previewTarget() -> (Pane, Entry, PreviewKind)? {
+    let source: Pane?
     if rightActive {
       switch rightMode {
       case .local: source = localRight
       case .icloud: source = icloud
+      case .ssh: source = ssh
       default: source = nil
       }
     } else {
-      source = rightMode == .ssh || leftMode == .ssh ? nil : local
+      source = leftMode == .ssh ? sshLeft : (rightMode == .ssh ? nil : local)
     }
     guard let source, let (entry, kind) = preview.target(source) else {
       return nil
@@ -210,34 +242,62 @@ final class MainView: View, Workspace {
   private func drawInfo(_ screen: Screen, _ y: Int) {
     let c = clip
     let hidden = (active as? PathPane)?.showHidden ?? local.showHidden
-    var keys: [(String, String)] = [
-      ("H", "Help"),
-      ("L", "reLoad"),
-      ("S", "Shell"),
-      ("V", "preView [\(preview.mode.label)]"),
-      ("Z", "Zip"),
-      ("U", "Unzip"),
-      (".", "Hidden [\(hidden ? "on" : "off")]"),
-      ("Space", "マーク"),
-      ("Tab", "タブ切替"),
+    // キーの名前（[keyId]）・表示・説明。選んでいる窓で押しても何もしないキーは出さない。
+    var keys: [(String, String, String)] = [
+      ("char:h", "H", "Help"),
+      ("char:l", "L", "reLoad"),
+      ("char:s", "S", "Shell"),
+      ("char:v", "V", "preView [\(preview.on ? "on" : "off")]"),
+      ("char:z", "Z", "Zip"),
+      ("char:u", "U", "Unzip"),
+      ("char:.", ".", "Hidden [\(hidden ? "on" : "off")]"),
+      ("char: ", "Space", tr("main_view.keys.mark")),
+      ("tab", "Tab", tr("main_view.keys.tab")),
     ]
     if uses(.ssh) {
-      keys.append(("Shift+Tab", "左タブ切替"))
+      keys.append(("backTab", "Shift+Tab", tr("main_view.keys.left_tab")))
     }
-    keys.append(("←→", "タブ移動"))
-    keys.append(("Ctrl+L", "Location"))
-    if (rightMode == .ssh && ssh.ssh != nil) || (leftMode == .ssh && sshLeft.ssh != nil) {
-      keys.append(("O", "clOse"))
-    }
-    keys.append(("Esc/Q", "Quit"))
-    drawKeyHints(screen, y, keys, note: c.map { "\($0.move ? "移動" : "コピー") \($0.length)項目  P 貼り付け  Esc 取り消し" })
+    keys.append(("left", "←→", tr("main_view.keys.switch_pane")))
+    keys.append(("ctrl:l", "Ctrl+L", "Location"))
+    keys.append(("char:o", "O", "clOse"))
+    drawKeyHints(screen, y, keys.filter { canPress($0.0) }.map { ($0.1, $0.2) }, note: c.map {
+      tr("main_view.clip.note", ["action": $0.move ? tr("main_view.clip.move") : tr("main_view.clip.copy"), "count": $0.length])
+    })
   }
 
   private func drawFunctionKeyBar(_ screen: Screen, _ y: Int) {
     screen.fill(0, y, screen.width, 1, Style())
     // F12（G）は、選んでいる窓で G を押したときの転送。Google Drive は暗号化して転送、Git は Git コマンド、SSH は scp、
     // iCloud Drive・右のローカルはコピー。向き（左→右・右→左）は名前の矢印で見せる。
-    drawFunctionKeys(screen, y, (transferCommand?.label ?? "", "G"))
+    // 選んでいる窓で使えないキーは、名前を出さずに空ける（キーの位置は変えない）。
+    let keys = functionKeys.map { key in key.flatMap { canPress("char:\($0.1.lowercased())") ? $0 : nil } }
+    drawFunctionKeys(screen, y, keys + [canPress("char:g") ? (transferCommand?.label ?? "", "G") : nil])
+  }
+
+  /// 選んでいる窓で、キー [id]（[keyId] の名前）を押して何かできるか。読むだけの場所での書き込む操作は、できないとする。
+  private func canPress(_ id: String) -> Bool {
+    let pane = active
+    if !pane.allowsKey(id) {
+      return false
+    }
+    if let operation = Self.operations[id] {
+      guard let command = operation == .transfer ? transferCommand : pane.commands[operation] else {
+        return false
+      }
+      // 切断（O）は、SSH でつないでいるときだけ。
+      if operation == .signOut && (pane as? SshPane)?.ssh == nil {
+        return false
+      }
+      return !(command.writes && pane.readOnly)
+    }
+    switch id {
+    case "char:c", "char:m", "f2", "f3":
+      return pane.canClip
+    case "char: ":
+      return pane.canMark
+    default:
+      return true
+    }
   }
 
   /// 選んでいる窓で G・F12 を押したときに実行するコマンド。左の窓の G は右のタブが決め、右の窓の G は右のタブ自身が持つ。
@@ -278,19 +338,15 @@ final class MainView: View, Workspace {
       }
       return
     }
-    // Esc は、C・M で選んでいればそれを取り消し、選んでいなければ Q と同じく終了を確かめる（どのタブでも）。
+    // Esc は、C・M で選んでいればそれを取り消す（どのタブでも）。
     if key.name == "escape" {
-      if clip != nil {
-        clip = nil
-      } else {
-        run { await self.quit() }
-      }
+      clip = nil
       return
     }
     if !pane.allowsKey(id) {
       return
     }
-    let page = max(1, app.terminal.height - 11)
+    let page = max(1, pane.visibleRows)
     switch key.name {
     case "up":
       pane.move(-1)
@@ -355,11 +411,9 @@ final class MainView: View, Workspace {
     case "m":
       setClip(move: true)
     case "v":
-      preview.cycleMode()
+      preview.on.toggle()
     case "?", "h":
       run { await self.help() }
-    case "q":
-      run { await self.quit() }
     default:
       break
     }
@@ -487,78 +541,20 @@ final class MainView: View, Workspace {
   }
 
   private func help() async {
-    await app.showMessage("キー操作", Self.helpText, maxWidth: 82)
+    await app.showMessage(tr("main_view.help.title"), Self.helpText, maxWidth: 82)
   }
 
-  private static let helpText = """
-    ↑↓ PgUp PgDn Home End  カーソル移動
+  private static var helpText: String { tr("main_view.help.text") }
 
-    ← →            左右の窓を切り替え
-    Tab            右の窓を Google Drive / git status / SSH / iCloud Drive / ローカル に切り替え
-                   (SSH はつなぐ前は ~/.ssh/config の Host の一覧。Enter でつなぐ)
-    Shift+Tab      左の窓をローカル / SSH に切り替え
-                   (左が SSH のときの右の SSH は、左の接続先から、その ~/.ssh/config でつなぐ)
-                   (左が SSH のときは、右はローカル / git status / SSH だけ。
-                    git status は接続先のリポジトリ。右がローカルなら G は SCP 転送)
-    SSH            接続先のファイルを一覧・マーク・コピー・移動・削除
-                   G/F12: ローカルとの転送  E/F8: 接続先で編集
-                   S: 接続先でコマンドを実行
-    Enter          フォルダーなら移動
-                   .zip .tar.gz .tar.xz は中をフォルダーのように表示 (読むだけ)
-                   Driveのファイルは一時フォルダーに復号
-                   SSH のファイルは接続先の $EDITOR (未設定・空ならvim) で編集
-                   (SSH の圧縮ファイルは、接続先の tar・bsdtar・unzip で中を表示)
-                   実行ファイルは引数を入れて実行
-                   割り当てのあるファイルはopen
-                   割り当てのないファイルはエディタ
-    BS             親フォルダーへ
-    Space          マーク / 反転
-    *              開いているフォルダーのマークを全部反転
-    C / M          コピー / 移動
-    P              開いているフォルダーに貼り付け
-    G              転送 (左→右: アップロード、右→左: ダウンロード)
-                   (右が SSH のときは F12 と同じく SCP 転送、同名は小窓で確認。
-                    左も SSH なら、左の接続先で scp を実行して左右の接続先の間で送る)
-                   (右が iCloud Drive・ローカルのときはコピー。同名は小窓で確認)
-                   (右が git status のときは Git コマンド。左で押すと左のファイルに
-                    git add / restore / rm を、ファイルの状態に合わせて出す)
-                   カーソルとマークの候補が複数ならマークだけ、1件ならカーソル
-    D / Del        削除 (ゴミ箱へ移動。SSH は rm で削除)
-    A              権限変更
-    S              シェル (コマンドを入れて枠の中で実行。終わったら Enter で戻る)
-    E              エディタ ($EDITORがなければvim固定)
-    R              名前の変更
-    K              mkdir (空のフォルダーを作る)
-    T              touch (空のファイルを作る)
-    Z              圧縮 (zip / tar.gz / tar.xz をカレントに作る。
-                   SSH は接続先の zip・tar・gzip・xz で作れる形式だけ)
-    U              カーソルの .zip .tar.gz .tar.xz をカレントに展開
-                   (SSH は接続先の tar・bsdtar・unzip で。なければ展開できない)
-    Ctrl+L         ディレクトリへ移動
-    ~              ホームへ移動
-    .              隠しファイルを表示
-    V              画像・動画のプレビューを右の窓に出す (off → dmp → iTerm → off)
-    O              SSH は切断
-    L              再読み込み
-    H / ?          このヘルプを表示
-    Q / Esc        終了 (C・M で選んでいるときの Esc は取り消し)
-    """
+  /// 終了している途中。
+  private var quitting = false
 
-  /// Ctrl+C など、キー以外からの終了要求。
-  func requestQuit() {
-    if let interrupt = app.interrupt {
-      // 枠の中で動かしているプログラムに届ける。
-      interrupt()
-    } else if !busy {
-      run { await self.quit() }
-    }
-  }
-
-  private func quit() async {
-    let message = "Quit? (Yes: Enter / No: ESC)"
-    if !(await app.confirm("終了", message, maxWidth: textWidth(message) + 4, showHints: false)) {
+  /// 確認せずに終了する（窓を閉じる・メニューや Dock の終了）。操作の途中や、ダイアログを開いていても終了する。
+  func quit() async {
+    if quitting {
       return
     }
+    quitting = true
     // 終了の前に、起動時に起動した Google ドライブ for デスクトップを止め、SSH の接続を片付ける。
     await drive.stopDriveApp()
     // 右の SSH は左の SSH を経由していることがあるので、右から片付ける。

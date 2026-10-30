@@ -439,7 +439,7 @@ final class Git {
     let (head, ref, after) = try await (headRun, refRun, afterRun)
     let ancestor = try await run(root, ["merge-base", "--is-ancestor", hash, "HEAD"])
     if ancestor.exitCode != 0 {
-      throw GitException("今の位置の履歴にないコミットは書き換えられません。")
+      throw GitException(tr("git.rewrite.not_in_history"))
     }
     let hashes = [hash] + splitOn(after, "\n").map(trim).filter { !$0.isEmpty }
     let read = try await execInput(["-C", root, "cat-file", "--batch"], Data((hashes.joined(separator: "\n") + "\n").utf8))
@@ -448,7 +448,7 @@ final class Git {
     }
     let commits = parseCatFileBatch([UInt8](read.stdoutData))
     if commits.count != hashes.count {
-      throw GitException("コミットを読めませんでした。")
+      throw GitException(tr("git.rewrite.unreadable"))
     }
     return AuthorRewrite(
       head: trim(head),
@@ -477,7 +477,7 @@ final class Git {
     }
     let reason = "fm-ee2e: コミットの作者を書き換え"
     guard let newHead = renamed[rewrite.head] else {
-      throw GitException("コミットを読めませんでした。")
+      throw GitException(tr("git.rewrite.unreadable"))
     }
     let target = rewrite.ref.map { [$0] } ?? ["--no-deref", "HEAD"]
     try await change(root, ["update-ref", "-m", reason] + target + [newHead, rewrite.head])
@@ -791,13 +791,22 @@ struct GitStatusLine {
   /// ファイルの変更の種類（modified など）。
   let label: String
 
+  /// 設定ファイルで色を決める変更の種類（new_file など）。競合はどれも conflict。
+  var statusKey: String { section == "unmerged" ? "conflict" : label.replacingOccurrences(of: " ", with: "_") }
+
   /// カーソルが乗る行か。
   var selectable: Bool {
     kind == .pushRemote || kind == .remote || kind == .branch || kind == .file
   }
 }
 
-/// リポジトリ名・push 先・リモート名・ブランチ名と、staged・unmerged（競合）・not staged・untracked のブロックに分けた行。空のブロックは出さない。
+/// 上の帯に出す、リポジトリ名とユーザー。リポジトリ名がなければ nil。
+func gitRepositoryText(_ status: GitStatus) -> String? {
+  guard let repository = status.repository else { return nil }
+  return status.user == nil ? repository : "\(repository)  \(status.user!)"
+}
+
+/// push 先・リモート名・ブランチ名と、staged・unmerged（競合）・not staged・untracked のブロックに分けた行。空のブロックは出さない。
 func gitStatusLines(_ status: GitStatus) -> [GitStatusLine] {
   var staged: [GitStatusLine] = []
   var unmerged: [GitStatusLine] = []
@@ -824,13 +833,11 @@ func gitStatusLines(_ status: GitStatus) -> [GitStatusLine] {
     }
   }
   let branch = status.branch
+  // リポジトリ名とユーザーは上の帯に出す（[gitRepositoryText]）。
   var lines: [GitStatusLine] = [
-    // リポジトリ名の前は、いつも1行空ける（カーソルは乗らない）。
+    // push 先の前は、いつも1行空ける（カーソルは乗らない）。
     GitStatusLine(.note, "")
   ]
-  if let repository = status.repository {
-    lines.append(GitStatusLine(.repository, status.user == nil ? repository : "\(repository)  \(status.user!)"))
-  }
   if let pushRemote = status.pushRemote {
     lines.append(GitStatusLine(.pushRemote, pushRemote))
   }
@@ -838,19 +845,20 @@ func gitStatusLines(_ status: GitStatus) -> [GitStatusLine] {
     lines.append(GitStatusLine(.remote, remote))
   }
   lines.append(GitStatusLine(.branch, branch == nil || branch == "HEAD" ? "(no branch)" : branch!))
-  // ブランチ名の下は、いつも1行空ける（カーソルは乗らない）。
-  lines.append(GitStatusLine(.note, ""))
+  // ブロックの見出しの前は、いつも1行空ける（カーソルは乗らない）。
   for (title, items) in [
     ("staged", staged),
     ("unmerged", unmerged),
     ("not staged", unstaged),
     ("untracked", untracked),
   ] where !items.isEmpty {
+    lines.append(GitStatusLine(.note, ""))
     lines.append(GitStatusLine(.heading, title))
     lines += items.map { GitStatusLine($0.kind, $0.text, label: $0.label, section: title, path: $0.path, from: $0.from) }
   }
   if status.entries.isEmpty {
-    lines.append(GitStatusLine(.note, "変更はありません"))
+    lines.append(GitStatusLine(.note, ""))
+    lines.append(GitStatusLine(.note, tr("git.status.no_changes")))
   }
   return lines
 }

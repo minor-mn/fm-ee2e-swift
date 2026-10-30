@@ -90,18 +90,18 @@ nonisolated struct EncryptedFormat: Sendable {
       throw NotEncryptedException()
     }
     if header.count < Self.headerLength {
-      throw CorruptedFileException("ヘッダーが途中で切れています。")
+      throw CorruptedFileException(tr("encrypted_format.truncated_header"))
     }
     let bytes = [UInt8](header)
     if bytes[6] != Self.version {
-      throw CorruptedFileException("未対応の形式の版です（\(bytes[6])）。")
+      throw CorruptedFileException(tr("encrypted_format.unsupported_version", ["version": bytes[6]]))
     }
     if !bytes[8..<16].elementsEqual(Self.keyId(key)) {
       throw WrongKeyException()
     }
     let fileChunkSize = bytes[16..<20].reduce(0) { $0 << 8 | Int($1) }
     if fileChunkSize == 0 || fileChunkSize > Self.maxChunkSize {
-      throw CorruptedFileException("チャンク長が不正です（\(fileChunkSize)）。")
+      throw CorruptedFileException(tr("encrypted_format.bad_chunk_size", ["size": fileChunkSize]))
     }
     let fileKey = Self.fileKey(key, Data(bytes[20..<52]))
     let blockSize = fileChunkSize + Self.tagLength
@@ -110,7 +110,7 @@ nonisolated struct EncryptedFormat: Sendable {
     var index = 0
     while true {
       if current.count < Self.tagLength {
-        throw CorruptedFileException("データが途中で切れています。")
+        throw CorruptedFileException(tr("encrypted_format.truncated_data"))
       }
       let next = current.count == blockSize ? try read(blockSize) : Data()
       let isFinal = next.isEmpty
@@ -118,7 +118,7 @@ nonisolated struct EncryptedFormat: Sendable {
       do {
         plain = try aead.open(fileKey, Self.nonce(index, isFinal), current, header)
       } catch is AuthenticationException {
-        throw CorruptedFileException("改ざん、破損、または途中で切れたデータです。")
+        throw CorruptedFileException(tr("encrypted_format.tampered"))
       }
       try write(plain)
       if isFinal {
@@ -214,13 +214,13 @@ nonisolated struct EncryptedFormat: Sendable {
 nonisolated struct NotEncryptedException: Error, CustomStringConvertible {
   init() {}
 
-  var description: String { "このアプリで暗号化されたファイルではありません。" }
+  var description: String { tr("encrypted_format.not_encrypted") }
 }
 
 nonisolated struct WrongKeyException: Error, CustomStringConvertible {
   init() {}
 
-  var description: String { "鍵が一致しません。別の鍵で暗号化されたファイルです。" }
+  var description: String { tr("encrypted_format.wrong_key") }
 }
 
 nonisolated struct CorruptedFileException: Error, CustomStringConvertible {

@@ -38,12 +38,14 @@ func runInTerminal(
 
 /// プログラムを動かす枠。動いている間はキーをすべてプログラムに渡し、Ctrl+C もプログラムに届ける。
 /// 終わったあとは ↑↓ PgUp PgDn で、画面から流れた出力をさかのぼれる。
-final class TerminalModal: Modal {
+final class TerminalModal: Modal, SelectionSource {
   init(_ app: App, _ title: String, _ close: @escaping (_ exitCode: Int) -> Void, waitAfterExit: @escaping (_ exitCode: Int) -> Bool) {
     self.app = app
     self.close = close
     self.waitAfterExit = waitAfterExit
-    terminal = ShellTerminal(max(2, app.terminal.width - 4), max(1, app.terminal.height - 6))
+    // 枠の中の大きさ（[drawBody] で描く大きさ）で始める。
+    let (columns, rows) = app.gridSize(app.host.width - 4, app.host.height - 6, theme: app.activeTheme)
+    terminal = ShellTerminal(max(2, columns), max(1, rows))
     super.init(title, accent: Palette.cyan)
   }
 
@@ -77,8 +79,8 @@ final class TerminalModal: Modal {
 
   override var hints: [(String, String)] {
     running
-      ? [("Ctrl+C", "中断")]
-      : (terminal.scrollback.isEmpty ? [] : [("↑↓ PgUp PgDn", "さかのぼる")]) + [("Enter", "戻る")]
+      ? [("Ctrl+C", tr("terminal_modal.keys.interrupt"))]
+      : (terminal.scrollback.isEmpty ? [] : [("↑↓ PgUp PgDn", tr("terminal_modal.keys.scroll_back"))]) + [("Enter", tr("terminal_modal.keys.back"))]
   }
 
   func start(_ executable: String, _ args: [String], workingDirectory: String? = nil) async throws {
@@ -93,10 +95,16 @@ final class TerminalModal: Modal {
     if !running || !session.running {
       return
     }
-    let input = ShellInput(terminal, send: { [weak session] in session?.write($0) })
+    // キーを送ったら、さかのぼっていた画面を今の画面に戻す。
+    let input = ShellInput(
+      terminal,
+      send: { [weak self, weak session] bytes in
+        self?.back = 0
+        session?.write(bytes)
+      }
+    )
     self.input = input
-    app.terminal.inputFilter = { [weak self] bytes in self?.input?.filter(bytes) ?? bytes }
-    app.interrupt = { [weak session] in session?.write([3]) }
+    app.host.inputFilter = { [weak self] bytes in self?.input?.filter(bytes) ?? bytes }
     app.requestRender()
   }
 
@@ -119,18 +127,26 @@ final class TerminalModal: Modal {
     app.requestRender()
   }
 
-  /// キーとCtrl+C を、このアプリに戻す。
+  /// キーを、このアプリに戻す。
   private func release() {
     if let input {
-      app.terminal.inputFilter = nil
-      app.interrupt = nil
+      app.host.inputFilter = nil
       input.dispose()
       self.input = nil
     }
   }
 
+  /// 中身は、選んでいる窓のタブの見た目（GUI 版では文字の大きさも）で、枠とは別の画面に描く。
+  /// GUI 版では、この画面の中だけをマウスで選んでコピーできる（枠は入らない）。
   override func drawBody(_ screen: Screen, _ x: Int, _ y: Int, _ width: Int) {
-    let rows = bodyRows
+    screen.layer(x, y, width, bodyRows, theme: app.activeTheme, selection: self) { s in
+      drawTerminal(s, s.width, s.height)
+    }
+  }
+
+  private func drawTerminal(_ screen: Screen, _ width: Int, _ rows: Int) {
+    let x = 0
+    let y = 0
     if terminal.columns != width || terminal.rows != rows {
       if let session, session.running {
         session.resize(width, rows)
@@ -152,11 +168,12 @@ final class TerminalModal: Modal {
         let cell = line[col]
         if !cell.text.isEmpty {
           let link = links[CellPosition(index, col)]
+          let style = ShellTerminal.resolved(cell.style)
           screen.text(
             x + col,
             y + row,
             cell.text,
-            link == nil ? cell.style : cell.style.copyWith(link: link),
+            link == nil ? style : style.copyWith(link: link),
             maxWidth: width - col
           )
         }
@@ -166,6 +183,22 @@ final class TerminalModal: Modal {
     if running && back == 0 && terminal.cursorVisible {
       screen.cursor = (x + terminal.x, y + terminal.y)
     }
+  }
+
+  // ---- 範囲選択（GUI 版） ----
+
+  var lineCount: Int { terminal.scrollback.count + terminal.rows }
+
+  var firstVisibleLine: Int { terminal.scrollback.count - min(max(back, 0), terminal.scrollback.count) }
+
+  func lineCells(_ line: Int) -> (cells: [String], continues: Bool) {
+    let cells = self.line(line)
+    return (cells.map(\.text), cells.last?.continues ?? false)
+  }
+
+  func scrollLines(_ delta: Int) {
+    back = min(max(back - delta, 0), terminal.scrollback.count)
+    app.requestRender()
   }
 
   /// 流れた行と今の画面を通した [index] 行目のセル。
@@ -256,7 +289,7 @@ final class TerminalModal: Modal {
     if running {
       return
     }
-    let page = max(1, bodyRows - 1)
+    let page = max(1, terminal.rows - 1)
     switch key.name {
     case "enter", "escape":
       close(exitCode!)

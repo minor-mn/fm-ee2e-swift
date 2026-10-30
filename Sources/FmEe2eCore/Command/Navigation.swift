@@ -55,7 +55,7 @@ class GoToPathCommand: Command {
 
   override func run(_ c: CommandContext) async {
     let pane = c.pane as! PathPane
-    guard let input = await c.app.input("ディレクトリへ移動", message: prompt, initial: pane.dirPath),
+    guard let input = await c.app.input(tr("navigation.go_to_title"), message: prompt, initial: pane.dirPath),
       !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     else {
       return
@@ -68,7 +68,7 @@ class GoToPathCommand: Command {
       let context = pane.context
       let target = context.normalize(context.isAbsolute(path) ? path : context.join(pane.dirPath, path))
       if !(try await isDirectory(c, target)) {
-        await c.app.showError("ディレクトリがありません: \(target)")
+        c.app.showStatus(tr("navigation.not_found", ["path": target]))
         return
       }
       await pane.goToDir(target)
@@ -79,7 +79,7 @@ class GoToPathCommand: Command {
 }
 
 final class LocalGoToPath: GoToPathCommand {
-  override var prompt: String { "パス（~ はホーム）" }
+  override var prompt: String { tr("navigation.local_prompt") }
 
   override func home(_ c: CommandContext) async throws -> String { homeDir }
 
@@ -90,7 +90,7 @@ final class LocalGoToPath: GoToPathCommand {
 }
 
 final class SshGoToPath: GoToPathCommand {
-  override var prompt: String { "接続先のパス（~ はホーム）" }
+  override var prompt: String { tr("navigation.ssh_prompt") }
 
   override func home(_ c: CommandContext) async throws -> String { try await (c.pane as! SshPane).ssh!.home() }
 

@@ -1,0 +1,642 @@
+// The English UI text of fm-ee2e. Copy it to ~/.config/fm-ee2e/languages/en.json5 to use it.
+// Each {name} is replaced by a name, a count and so on. An array is one text, its items joined with line breaks.
+{
+  // Errors in the config file (config.json5)
+  app_config: {
+    not_json: "Can’t read it as JSON.",
+    not_json_detail: " ({detail})",
+    root_not_object: "Write it in the form { \"right_tabs\": … }.",
+    unknown_root_key: "“{key}” isn’t allowed. Use one of {names}.",
+    language_invalid: "Set language to the name of a file in the languages folder, without .json5 (ja, en, etc.).",
+    right_tabs_not_object: "In right_tabs, write true or false for each tab.",
+    unknown_key: "“{name}” isn’t allowed in {path}. Use one of {names}.",
+    list_separator: ", ",
+    right_tabs_not_bool: "The value of “{key}” in right_tabs must be true or false.",
+    alpha_only_background: "{path} must be a color in the form “#RRGGBB” (opacity is allowed only for the background color).",
+    font_family_invalid: "In {path}.font.family, write a font name or a list of names [ … ].",
+    gradient_needs_from_to: "In {path}.gradient, write the from and to colors.",
+    image_path_missing: "Write the image path in {path}.image.path.",
+    one_of: "{path} must be one of {names}.",
+    not_object: "In {path}, write the items in the form { … }.",
+    not_bool: "{path} must be true or false.",
+    out_of_range: "{path} must be a number from {min} to {max}.",
+    not_color: "{path} must be a color in the form “#RRGGBB” or “#RRGGBBAA”.",
+  },
+  // Main screen
+  main_view: {
+    no_tab: {
+      title: "No tabs to show in the right pane.",
+      hint: "Set some to true in right_tabs in ~/.config/fm-ee2e/config.json5.",
+    },
+    git_checking: "Checking…",
+    choose_left_ssh: "Choose a host in the left SSH pane.",
+    terminal_too_small: "Terminal too small",
+    // Pane names in the marks line
+    side: {
+      left: "Left",
+      right: "Right",
+    },
+    // Key hints at the bottom
+    keys: {
+      mark: "Mark",
+      tab: "Switch right tab",
+      left_tab: "Switch left tab",
+      switch_pane: "Switch pane",
+    },
+    // Right end of the key hints after choosing with C or M
+    clip: {
+      move: "Move",
+      copy: "Copy",
+      note: "{action} {count} items  P Paste  Esc Cancel",
+    },
+    // Help shown with H / ?
+    help: {
+      title: "Keys",
+      text: [
+        "↑↓ PgUp PgDn Home End  Move the cursor",
+        "",
+        "← →            Switch between the left and right panes",
+        "Tab            Switch the right pane: Google Drive / git status / SSH / iCloud Drive / Local",
+        "               (Before connecting, SSH lists the Hosts in ~/.ssh/config. Enter connects)",
+        "Shift+Tab      Switch the left pane: Local / SSH",
+        "               (When the left is SSH, the right SSH connects from the left host, using its ~/.ssh/config)",
+        "               (When the left is SSH, the right is only Local / git status / SSH.",
+        "                git status shows the host’s repository. If the right is Local, G transfers by SCP)",
+        "SSH            List, mark, copy, move and delete files on the host",
+        "               G/F12: Transfer to/from local  E/F8: Edit on the host",
+        "               S: Run a command on the host",
+        "Enter          Folder: open it",
+        "               .zip .tar.gz .tar.xz: show the contents like a folder (read-only)",
+        "               Drive file: decrypt into a temporary folder",
+        "               SSH file: edit with the host’s $EDITOR (vim if unset or empty)",
+        "               (SSH archives are listed with tar, bsdtar or unzip on the host)",
+        "               Executable: run it with arguments",
+        "               File with an associated app: open",
+        "               File without an associated app: editor",
+        "BS             Go to the parent folder",
+        "Space          Mark / unmark",
+        "*              Invert all marks in the current folder",
+        "C / M          Copy / move",
+        "P              Paste into the current folder",
+        "G              Transfer (left→right: upload, right→left: download)",
+        "               (When the right is SSH, SCP transfer like F12; same names are confirmed in a dialog.",
+        "                If the left is SSH too, runs scp on the left host to send between the two hosts)",
+        "               (When the right is iCloud Drive or Local, copies; same names are confirmed in a dialog)",
+        "               (When the right is git status, Git commands. Pressed on the left, offers",
+        "                git add / restore / rm for the left files, depending on their state)",
+        "               If the cursor and marks give several targets, marks only; if one, the cursor",
+        "D / Del        Delete (move to the Trash; SSH deletes with rm)",
+        "A              Change permissions",
+        "S              Shell (enter a command and run it in a frame; Enter returns when done)",
+        "E              Editor (vim if $EDITOR is not set)",
+        "R              Rename",
+        "K              mkdir (create an empty folder)",
+        "T              touch (create an empty file)",
+        "Z              Compress (create zip / tar.gz / tar.xz in the current folder;",
+        "               SSH: only formats the host’s zip, tar, gzip, xz can create)",
+        "U              Extract the .zip .tar.gz .tar.xz at the cursor into the current folder",
+        "               (SSH uses tar, bsdtar or unzip on the host; can’t extract without them)",
+        "Ctrl+L         Go to a directory",
+        "~              Go home",
+        ".              Show hidden files",
+        "V              Preview images and videos in the other pane (on/off; SSH: images only)",
+        "O              Disconnect SSH",
+        "L              Reload",
+        "H / ?          Show this help",
+        "Esc            Cancel the choice made with C or M",
+      ],
+    },
+  },
+  // Startup
+  run_app: {
+    config_unreadable: "Can’t read ~/.config/fm-ee2e/config.json5.\n{error}",
+    font_separator: ", ",
+    missing_fonts: "Font {fonts} not found, so SF Mono is used.",
+  },
+  // Marks line
+  status_bars: {
+    marks: "{side}: {count} items marked ({size} of files)",
+    marks_elsewhere: "{count} of them in folders not open",
+  },
+  // Image and video preview
+  preview_overlay: {
+    unavailable: "Can’t preview",
+    loading: "Loading…",
+  },
+  // GUI version
+  gui_app: {
+    config_reload_failed: "Can’t read ~/.config/fm-ee2e/config.json5. Keeping the current settings.\n{error}",
+    // Menu
+    menu: {
+      quit: "Quit fm-ee2e-swift",
+      edit: "Edit",
+      copy: "Copy",
+      paste: "Paste",
+      select_all: "Select All",
+      view: "View",
+      zoom_in: "Zoom In",
+      zoom_out: "Zoom Out",
+      zoom_reset: "Actual Size",
+      window: "Window",
+      minimize: "Minimize",
+      close: "Close",
+    },
+  },
+  // External commands
+  process: {
+    failed: "{command} failed",
+    exit_status: "[exit code {code}]",
+    cannot_run: "Can’t run {executable}: {error}",
+  },
+  // Shell terminal
+  shell_session: {
+    already_started: "This session has already started.",
+    start_failed: "Couldn’t start the terminal.",
+  },
+  // Shell frame
+  terminal_modal: {
+    // Key hints
+    keys: {
+      interrupt: "Interrupt",
+      scroll_back: "Scroll back",
+      back: "Back",
+    },
+  },
+  // Local files
+  local_files: {
+    trash_failed: "Can’t move to the Trash",
+  },
+  // Archives
+  archive: {
+    extract_failed: "Can’t extract",
+  },
+
+  // Transfer (Google Drive, iCloud Drive, local, SSH)
+  transfer: {
+    // Google Drive
+    drive_unavailable: "Google Drive is unavailable.",
+    drive_loading: "Loading the Google Drive folder.",
+    in_progress: "{title} in progress…",
+    in_progress_item: "{title} in progress… {name}",
+    upload: "Upload",
+    drive_upload_confirm: "Encrypt {label} and upload to {location} on Google Drive.",
+    download: "Download",
+    drive_download_confirm: "Decrypt {label} and download to {dir}.",
+    in_progress_count: "{title} in progress ({index}/{total}) {name}",
+    // iCloud Drive
+    icloud_unavailable: "iCloud Drive is unavailable.",
+    icloud_loading: "Loading the iCloud Drive folder.",
+    icloud_upload_confirm: "Upload {label} to {location}.",
+    icloud_download_confirm: "Download {label} to {dir}.",
+    // Local to local
+    copy: "Copy",
+    copy_confirm: "Copy {label} to {dir}.",
+    // SSH (scp)
+    ssh_not_selected: "Choose an SSH host.",
+    scp_confirm: "{title}: {label}",
+    created_during_transfer: "An item with the same name was created during the transfer. Run it again and choose Overwrite.",
+    replace_failed: "Replacing failed. The original data is kept at {previous}.",
+    staging_remove_failed: "Can’t delete the temporary folder {staging}: {error}",
+    copy_right: "Copy to right",
+    copy_left: "Copy to left",
+  },
+  // Common dialog text
+  dialogs: {
+    hint: {
+      close: "Close",
+      complete: "Complete",
+      history: "History",
+      decide: "OK",
+      move: "Move",
+      toggle: "Toggle",
+      apply: "Apply",
+      select: "Select",
+      page: "Page",
+      abort: "Abort",
+    },
+    cancel: "Cancel",
+    // When the input candidates don’t fit
+    more_candidates: "…and {count} more",
+    // Arguments of an executable
+    exec: {
+      title: "Run",
+      arguments: "Arguments",
+    },
+    // Permissions
+    mode: {
+      title: "Permissions",
+      owner: "Owner",
+      group: "Group",
+      other: "Others",
+      special: "Special",
+      read: "Read",
+      write: "Write",
+      execute: "Execute",
+    },
+    progress_title: "Please wait",
+    error_title: "Error",
+    yes: "Yes",
+  },
+  // Compress and extract
+  archive_command: {
+    unavailable: "Can’t compress.",
+    checking: "Checking…",
+    format_title: "Archive format",
+    compress_title: "Compress",
+    compress_message: "Compress {count} items into {place}. File name",
+    compressing: "Compressing…",
+    ssh_unavailable: "{host} has neither zip nor tar (gzip, xz), so it can’t compress.",
+    reading: "Reading “{name}”…",
+    extract_title: "Extract",
+    extract_confirm: "Extract “{name}” into {place}.",
+    extract_yes: "Extract",
+    clash_title: "Same names exist ({names})",
+    clash_more: " …",
+    name_separator: ", ",
+    overwrite: "Overwrite",
+    keep_existing: "Keep existing files",
+    extracting: "Extracting “{name}”…",
+  },
+  // Delete
+  delete: {
+    // Move to the Trash (local, iCloud Drive)
+    trash_title: "Move to Trash",
+    trash_confirm: "Move {label} to the Trash.",
+    trash_yes: "Move",
+    trash_progress: "Moving…",
+    // SSH
+    ssh_title: "Delete",
+    ssh_confirm: [
+      "Delete {label} from {host}.",
+      "There is no Trash, so this can’t be undone.",
+    ],
+    ssh_yes: "Delete",
+    ssh_progress: "Deleting…",
+  },
+  // Paste
+  paste: {
+    use_transfer: "Use G to transfer between local and Google Drive or SSH.",
+    moving: "Moving…",
+    copying: "Copying…",
+    cannot_move_into_itself: "{name}: Can’t move a folder into itself.",
+    cannot_copy_into_itself: "{name}: Can’t copy a folder into itself.",
+    other_connection: "This is a different connection from the one copied or moved from.",
+  },
+  // Same-name confirmation and name input
+  prompts: {
+    conflict: {
+      title: "A file or folder with the same name exists",
+      apply_to_rest: "Apply to all remaining",
+      overwrite: "Overwrite",
+      rename: "Save with another name",
+      skip: "Skip",
+      apply_to_all: "Apply to all",
+      cancel: "Stop",
+    },
+    name: {
+      slash: "“/” can’t be used.",
+      exists: "The same name exists.",
+    },
+  },
+  // Setting up the Google Drive key
+  drive_setup: {
+    title: "Set up a key",
+    generate_title: "Generate a new key",
+    paste_title: "Paste an existing key",
+    save_failed: "Couldn’t save: {error}",
+    generate_confirm: [
+      "Save a new key to {key_file}.",
+      "If you lose the key, encrypted files can’t be decrypted. Keep a backup somewhere else.",
+    ],
+    generate_yes: "Generate",
+    paste_message: "Paste the text: {header} on the first line, the key in Base64 on the second.",
+  },
+  // Open in an editor
+  edit: {
+    is_folder: "A folder can’t be opened in an editor.",
+    missing: "The file doesn’t exist (it was deleted).",
+  },
+  // Go to a directory
+  navigation: {
+    go_to_title: "Go to directory",
+    not_found: "No such directory: {path}",
+    local_prompt: "Path (~ is home)",
+    ssh_prompt: "Path on the host (~ is home)",
+  },
+  // Common command text
+  command: {
+    select_one: "Select only one item.",
+    quoted_name: "“{name}”",
+    items: "{count} items",
+  },
+  // New folder
+  mkdir: {
+    title: "New folder",
+    message: "Folder name",
+  },
+  // Rename
+  rename: {
+    title: "Rename",
+  },
+  // Shell
+  shell: {
+    title: "Shell",
+  },
+  // SSH disconnect
+  sign_out: {
+    title: "Disconnect",
+    confirm: "Disconnect from {host}.",
+  },
+  // Create an empty file
+  touch: {
+    message: "File name",
+  },
+
+  drive_edit: {
+    // When saving an edited Google Drive file whose original has changed
+    changed: {
+      title: "The file on Google Drive has changed",
+      overwrite: "Overwrite",
+      save_as: "Save with another name",
+      dont_save: "Don’t save",
+      note_deleted: "“{name}” was removed from Google Drive after it was opened.",
+      note_modified: "“{name}” was changed on Google Drive after it was opened.",
+    },
+    // Edit and save progress and errors
+    encrypting: "Encrypting “{name}”…",
+    cannot_open: "Can’t open {path}.",
+    decrypting: "Decrypting “{name}”…",
+    save_failed_kept: [
+      "Couldn’t save. You can save your edits the next time the app starts.",
+      "{message}",
+    ],
+    // At startup, ask about edits that couldn’t be saved before
+    recover: {
+      title: "There are unsaved edits",
+      save: "Save to Google Drive",
+      discard: "Discard",
+      note: "“{name}” was edited but not saved to Google Drive.",
+    },
+    save_failed: [
+      "Couldn’t save.",
+      "{message}",
+    ],
+  },
+  drive_pane: {
+    // Shown when the Google Drive pane can’t be used
+    placeholder: {
+      checking: "Checking…",
+      not_installed: "Install Google Drive for desktop",
+      no_key: "No key file ({key_file}).",
+      no_key_hint: "Enter: Set up a key (generate a new one or paste an existing one)",
+      bad_key: "Can’t read the key file.",
+      retry_hint: "After fixing it, press L to check again.",
+      unavailable: "Google Drive is unavailable.",
+    },
+    // Upload and download
+    uploading: "Uploading to Google Drive…",
+    uploading_remaining: "Uploading to Google Drive… ({count} left)",
+    cannot_move: "Can’t move to {path}: {reason}",
+    decrypting: "Decrypting “{name}”…",
+    cannot_make_temp: "Can’t create a temporary folder: {reason}",
+  },
+  icloud_pane: {
+    // Shown when the iCloud Drive pane can’t be used
+    placeholder: {
+      checking: "Checking…",
+      not_available: "iCloud Drive is unavailable.",
+      not_available_hint: "Turn on iCloud Drive in this Mac’s System Settings.",
+      unreadable: "Can’t read the iCloud Drive folder.",
+      retry_hint: "After fixing it, press L to check again.",
+    },
+  },
+  local_pane: {
+    // Inside an archive
+    extracting: "Extracting “{name}”…",
+    read_only_archive: "Not available inside an archive (read-only).",
+  },
+  pane: {
+    // List loading, failure and empty
+    loading: "Loading…",
+    load_failed: "Can’t load: {message}",
+    reload_hint: "L: Reload",
+    empty_folder: "This folder is empty",
+  },
+  ssh_pane: {
+    // Shown when the SSH pane has nothing to show
+    placeholder: {
+      choose_host: "Choose a host in the left SSH pane.",
+      no_remote_config: "{host} has no ~/.ssh/config.",
+      no_config: "SSH is unavailable. (Add ~/.ssh/config to use it)",
+    },
+    disconnected: "Disconnected from {host}. Choose it again.",
+    // Archives and downloads
+    read_only_archive: "Not available inside an archive (read-only).",
+    downloading: "Downloading “{name}”…",
+    download_cancelled: "Stopped downloading “{name}”.",
+    opening_archive: "Reading “{name}”…",
+    extracting: "Extracting “{name}”…",
+    cannot_make_temp: "Can’t create a temporary folder: {reason}",
+    // Connection
+    connecting: "Connecting…",
+  },
+  ssh: {
+    // ssh and scp errors
+    exit_code: "exit code {code}",
+    cannot_create_file: "Can’t create the file",
+    newline_in_name: "Names containing line breaks aren’t supported.",
+  },
+  remote_archive: {
+    // Archives on the host
+    no_unzip: "{host} has neither bsdtar nor unzip, so zip can’t be handled.",
+    no_tar: "{host} has no tar, so tar.gz and tar.xz can’t be handled.",
+    cannot_extract: "Can’t extract “{path}”.",
+  },
+  encrypted_format: {
+    // When an encrypted file can’t be read
+    truncated_header: "The header is truncated.",
+    unsupported_version: "Unsupported format version ({version}).",
+    bad_chunk_size: "Invalid chunk size ({size}).",
+    truncated_data: "The data is truncated.",
+    tampered: "The data is tampered with, corrupted or truncated.",
+    not_encrypted: "This file wasn’t encrypted by this app.",
+    wrong_key: "The key doesn’t match. The file was encrypted with another key.",
+  },
+  key_file: {
+    // When the key file can’t be read or created
+    bad_format: "Not a key. The first line must be {header}.",
+    bad_base64: "The second line of the key isn’t valid Base64.",
+    bad_length: "The key isn’t {expected} bytes long ({actual} bytes).",
+    cannot_set_permission: "Can’t set permissions: {reason}",
+  },
+
+  git_commands: {
+    // Progress text ({command} is git switch, etc.)
+    running: "Running {command}…",
+    // Choose the remote to track
+    remote: {
+      no_branch: "Not on a branch, so a remote can’t be set.",
+      none_registered: "No remotes are registered.",
+      title: "Upstream of “{branch}”",
+    },
+    // Switch or create a branch
+    branch: {
+      create: "Create a new branch",
+      switch_title: "Switch branch",
+      switch_with_changes: [
+        "There are uncommitted changes. They will be carried over to the branch you switch to.",
+        "If files overlap with that branch, git stops (the changes aren’t lost).",
+        "Continue?",
+      ],
+      switch_yes: "Switch",
+      new_name: "Name of the branch to create from here",
+      name_required: "Enter a branch name.",
+      invalid_name: "“{name}” can’t be used as a branch name.",
+    },
+    // Choose the push destination (branch.<name>.pushRemote)
+    push_remote: {
+      no_branch: "Not on a branch, so a push destination can’t be set.",
+      title: "Push destination of “{branch}”",
+      note: [
+        "Set this only when you push to a separate remote. Usually not needed.",
+        "To add one, append something like this to .git/config (with your own name and URL).",
+        "[remote \"fork\"]",
+        "    url = https://github.com/you/repo.git",
+        "    fetch = +refs/heads/*:refs/remotes/fork/*",
+      ],
+    },
+    // Diff
+    no_diff: "No differences.",
+    // git commit
+    commit: {
+      marks_ignored: " (marks are ignored)",
+      message: "Commit message",
+      message_required: "Enter a commit message.",
+    },
+    // git push and pull
+    push: {
+      no_remote: "Select a remote",
+    },
+    pull: {
+      with_changes: [
+        "There are uncommitted changes.",
+        "They may conflict with the changes pulled in (git stops if the same files are involved).",
+        "Continue?",
+      ],
+      yes: "Continue",
+    },
+    force_push: {
+      branch: "“{branch}” ",
+      message: [
+        "Overwrite the remote {branch}branch with your local content.",
+        "Stops if the remote has changed since it was last fetched.",
+      ],
+      yes: "Overwrite",
+    },
+    // Target name or count (goes into {label})
+    label: {
+      one: "“{path}”",
+      files: "{count} files",
+      items: "{count} items",
+    },
+    // git restore
+    restore: {
+      message: [
+        "Discard the unstaged changes of {label} and restore the staged state (or the last commit if nothing is staged).",
+        "Discarded changes can’t be recovered.",
+      ],
+      yes: "Discard",
+    },
+    // Git commands for targets in the left pane
+    left: {
+      nothing: "Nothing for git to handle (no changes, or excluded by .gitignore).",
+      command_with_count: "{command} ({count} items)",
+    },
+    // git rm
+    rm: {
+      message: [
+        "Remove {label} from git and delete the files too (committed content stays in git).",
+        "If there are uncommitted changes, git stops.",
+      ],
+      yes: "Remove",
+    },
+    // git branch -m
+    rename: {
+      new_name: "New branch name",
+    },
+  },
+  log_view: {
+    // Key hints for the commit list
+    hints: {
+      move: "Move",
+      mark: "Mark",
+      open: "Open",
+      edit: "Edit author/message",
+      back: "Back",
+    },
+    // Progress text ({command} is git log, etc.)
+    running: "Running {command}…",
+    // Rewriting the author and message of a commit
+    edit: {
+      signed: "Only the latest commit can be rewritten (continuing would remove signatures from some commits).",
+      required: "{what} is required.",
+      no_angle_brackets: "{what} can’t contain < or >.",
+      author_name: "Author name",
+      name: "Name",
+      author_email: "Author email address",
+      email: "Email address",
+      message: "Commit message",
+      message_required: "Enter a commit message.",
+      rewrite_title: "Rewrite commit",
+      pushed: [
+        "This commit has already been pushed. Rewriting it will diverge from the remote.",
+        "To update the remote, git push --force-with-lease is needed.",
+      ],
+      later: "The {count} commits after it will also be recreated.",
+      continue: "Continue?",
+      rewrite_yes: "Rewrite",
+      rewriting: "Rewriting commits…",
+    },
+    // List heading ({title} is git log  branch name, etc.)
+    heading_count: "{title}  {count} commits",
+    // When the list is empty
+    empty: {
+      commits: "No commits yet.",
+      file_commits: "No commits for this file yet.",
+      files: "No files changed.",
+    },
+    no_diff: "No differences.",
+  },
+  diff_view: {
+    // Key hints for the diff screen
+    hints: {
+      scroll: "Scroll",
+      next_prev: "Next / previous change",
+      files: "Next / previous file",
+      back: "Back",
+    },
+    // When the content diff can’t be shown
+    binary: "Binary file; the content diff can’t be shown.",
+    empty_file: "Empty file.",
+    no_content_diff: "No content differences (only permission changes or the like).",
+    // Separator between hunks
+    hunk_from: "⋯ from line {line}",
+  },
+  git: {
+    // Rewriting the author of a commit
+    rewrite: {
+      not_in_history: "Commits not in the history of the current position can’t be rewritten.",
+      unreadable: "Couldn’t read the commit.",
+    },
+    // List in the Git pane
+    status: {
+      no_changes: "No changes",
+    },
+  },
+  git_pane: {
+    // Git pane title and hints
+    loading: "Loading Git…",
+    no_git: "The host has no git.",
+    not_repository: "This folder isn’t under git.",
+  },
+}

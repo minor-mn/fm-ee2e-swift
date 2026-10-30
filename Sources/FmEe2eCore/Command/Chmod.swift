@@ -15,7 +15,7 @@ class ChmodCommand: Command {
       return
     }
     let first = firstMark.entry
-    let label = targets.count == 1 ? first.name : "\(targets.count)項目"
+    let label = targets.count == 1 ? first.name : tr("command.items", ["count": targets.count])
     guard let bits = await c.app.askMode(label, first.mode ?? 0x1a4, isDir: first.isDir) else {
       return
     }

@@ -7,7 +7,7 @@ class CompressCommand: Command {
   func formats(_ c: CommandContext) async throws -> [ArchiveFormat] { fatalError("formats") }
 
   /// どの形式も使えないときに出す文。
-  func unavailable(_ c: CommandContext) -> String { "圧縮できません。" }
+  func unavailable(_ c: CommandContext) -> String { tr("archive_command.unavailable") }
 
   /// 圧縮先のフォルダー（小窓に出す）。
   func place(_ c: CommandContext) -> String { fatalError("place") }
@@ -28,20 +28,20 @@ class CompressCommand: Command {
     }
     let app = c.app
     do {
-      let available = try await app.withProgress("確認中…") { try await self.formats(c) }
+      let available = try await app.withProgress(tr("archive_command.checking")) { try await self.formats(c) }
       if available.isEmpty {
         await app.showError(unavailable(c))
         return
       }
-      guard let choice = await app.askChoice("圧縮の形式", available.map { $0.label }) else {
+      guard let choice = await app.askChoice(tr("archive_command.format_title"), available.map { $0.label }) else {
         return
       }
       let format = available[choice]
       let names = try await existing(c)
       let name = await askName(
         app,
-        "圧縮",
-        message: "\(targets.count)項目を \(place(c)) に圧縮します。ファイル名",
+        tr("archive_command.compress_title"),
+        message: tr("archive_command.compress_message", ["count": targets.count, "place": place(c)]),
         // 最初にマークした項目の名前に拡張子を付ける。
         initial: "\(targets[0].entry.name)\(format.extension)",
         existing: names
@@ -50,7 +50,7 @@ class CompressCommand: Command {
         return
       }
       do {
-        try await app.withProgress("圧縮中…") { try await self.compress(c, targets, name, format) }
+        try await app.withProgress(tr("archive_command.compressing")) { try await self.compress(c, targets, name, format) }
         pane.marks.clear()
       } catch {
         await app.showError(error)
@@ -83,7 +83,7 @@ final class SshCompress: CompressCommand {
   }
 
   override func unavailable(_ c: CommandContext) -> String {
-    "\((c.pane as! SshPane).ssh!.host) には zip も tar（gzip・xz）もないので、圧縮できません。"
+    tr("archive_command.ssh_unavailable", ["host": (c.pane as! SshPane).ssh!.host])
   }
 
   override func place(_ c: CommandContext) -> String { (c.pane as! SshPane).location }
@@ -126,30 +126,34 @@ class ExtractCommand: Command {
     }
     let app = c.app
     do {
-      let archive = try await app.withProgress("「\(entry.name)」を読み込み中…") { try await self.open(c, target) }
+      let archive = try await app.withProgress(tr("archive_command.reading", ["name": entry.name])) { try await self.open(c, target) }
       // 最上位の名前が今のフォルダーにあれば、上書きするか聞く。
       let names = try await existing(c)
       let clashes = archiveChildren(archive.items, "").filter { names.contains($0.name) }.map { $0.name }
       var keepExisting = false
       if clashes.isEmpty {
-        if !(await app.confirm("展開", "「\(entry.name)」を \(place(c)) に展開します。", yes: "展開")) {
+        if !(await app.confirm(
+          tr("archive_command.extract_title"),
+          tr("archive_command.extract_confirm", ["name": entry.name, "place": place(c)]),
+          yes: tr("archive_command.extract_yes")
+        )) {
           return
         }
       } else {
-        let shown = clashes.prefix(5).joined(separator: "、")
+        let shown = clashes.prefix(5).joined(separator: tr("archive_command.name_separator"))
         guard
           let choice = await app.askChoice(
-            "同じ名前があります（\(shown)\(clashes.count > 5 ? " ほか" : "")）",
+            tr("archive_command.clash_title", ["names": shown + (clashes.count > 5 ? tr("archive_command.clash_more") : "")]),
             [
-              "上書きする",
-              "今あるファイルは残す",
+              tr("archive_command.overwrite"),
+              tr("archive_command.keep_existing"),
             ])
         else {
           return
         }
         keepExisting = choice == 1
       }
-      try await app.withProgress("「\(entry.name)」を展開中…") { try await archive.extractAll(keepExisting) }
+      try await app.withProgress(tr("archive_command.extracting", ["name": entry.name])) { try await archive.extractAll(keepExisting) }
     } catch {
       await app.showError(error)
     }

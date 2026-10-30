@@ -208,7 +208,7 @@ nonisolated func escapeTarPattern(_ raw: String) -> String {
 /// [item] を [dest] に取り出し、取り出したファイルのパスを返す。
 func extractArchiveItem(_ archive: String, _ item: ArchiveItem, _ dest: String) async throws -> String {
   guard let raw = item.raw else {
-    throw FileSystemException("取り出せません", item.path)
+    throw FileSystemException(tr("archive.extract_failed"), item.path)
   }
   // tar は名前をワイルドカードとして扱うので、記号をエスケープする。
   let pattern = escapeTarPattern(raw)

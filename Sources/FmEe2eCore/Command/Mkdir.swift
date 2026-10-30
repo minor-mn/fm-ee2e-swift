@@ -24,7 +24,7 @@ class MkdirCommand: Command {
       await c.app.showError(error)
       return
     }
-    guard let name = await askName(c.app, "新しいフォルダー", message: "フォルダー名", existing: existing) else {
+    guard let name = await askName(c.app, tr("mkdir.title"), message: tr("mkdir.message"), existing: existing) else {
       return
     }
     do {

@@ -32,6 +32,17 @@ nonisolated struct DiskUsage: Sendable {
   let free: Int?
 }
 
+/// [dir] の下のファイルの、元の大きさ（ls の大きさ）の合計。手元から外したクラウドのファイルも数える。数えられなければ nil。
+func apparentSize(_ dir: String) async -> Int? {
+  // 読めないフォルダーがあると終了コードは 0 でなくなるが、読めた分の合計は出る。
+  guard let run = try? await runProcess("/usr/bin/du", ["-A", "-sk", dir]),
+    let field = run.stdout.split(whereSeparator: { $0 == " " || $0 == "\t" }).first, let kib = Int(field)
+  else {
+    return nil
+  }
+  return kib * 1024
+}
+
 /// `df -Pk` の出力を読む。読めなければ nil。
 nonisolated func parseDf(_ output: String) -> DiskUsage? {
   let lines = output.trimmingCharacters(in: .whitespacesAndNewlines).components(separatedBy: "\n")

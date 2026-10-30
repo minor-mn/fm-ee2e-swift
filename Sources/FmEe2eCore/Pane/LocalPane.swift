@@ -26,6 +26,8 @@ class LocalPane: PathPane {
     LocalClip(targets.map(pathOfMark), move: move)
   }
 
+  override var canClip: Bool { !readOnly }
+
   override var context: PathContext { p }
 
   override var dirPath: String { dir }
@@ -57,7 +59,9 @@ class LocalPane: PathPane {
 
   override var location: String { inArchive ? p.join(archive!, archiveDir) : dir }
 
-  override var accent: Rgb { Palette.purple }
+  override var accent: Rgb { colors.accent ?? colors.purple }
+
+  override var themeKey: ThemeKey { .local }
 
   /// 名前（.. を含む）ごとの所有者など。
   private var ownership: [String: Ownership] = [:]
@@ -142,6 +146,7 @@ class LocalPane: PathPane {
           // 所有者・グループ・その他のいずれかに x があれば実行ファイル。
           executable: file != nil && stat.mode & 0x49 != 0,
           mode: stat.mode & 0xfff,
+          isLink: lstatPath(path).type == .link,
           data: source
         )
       )
@@ -200,7 +205,7 @@ class LocalPane: PathPane {
     let temp = try await createOpenTemp()
     let path: String
     do {
-      path = try await app.withProgress("「\(item.name)」を取り出し中…") { try await extractArchiveItem(archive!, item, temp) }
+      path = try await app.withProgress(tr("local_pane.extracting", ["name": item.name])) { try await extractArchiveItem(archive!, item, temp) }
     } catch {
       try? FileManager.default.removeItem(atPath: temp)
       throw error
@@ -218,7 +223,7 @@ class LocalPane: PathPane {
   }
 
   /// [entry] のファイルから [make] でプレビューを作る。圧縮ファイルの中のものは取り出して作る。作れなければ nil。
-  func preview<T>(_ entry: Entry, _ make: (_ path: String, _ work: String) async throws -> T?) async throws -> T? {
+  func preview<T>(_ entry: Entry, _ make: (_ path: String) async throws -> T?) async throws -> T? {
     let work = try FileManager.default.url(
       for: .itemReplacementDirectory, in: .userDomainMask, appropriateFor: URL(fileURLWithPath: NSTemporaryDirectory()), create: true
     ).path
@@ -231,7 +236,7 @@ class LocalPane: PathPane {
       try FileManager.default.createDirectory(atPath: extracted, withIntermediateDirectories: false)
       path = try await extractArchiveItem(archive, entry.data as! ArchiveItem, extracted)
     }
-    return try await make(path, work)
+    return try await make(path)
   }
 
   override func open(_ entry: Entry) async {
@@ -279,7 +284,7 @@ class LocalPane: PathPane {
 
   override func checkWritable() async -> Bool {
     if inArchive {
-      await app.showError("圧縮ファイルの中では使えません（読むだけです）。")
+      app.showStatus(tr("local_pane.read_only_archive"))
       return false
     }
     return true
@@ -336,20 +341,21 @@ final class RightLocalPane: LocalPane {
 
 /// 右の窓に出せるタブがないときの右の窓。[placeholder] の案内だけを出す。
 final class NoTabPane: Pane {
+  /// [placeholder] は出す文言の名前（[tr] の key）。文言のファイルを読み直したら、出す文も変わる。
   init(_ app: App, _ placeholder: [String]) {
-    placeholderLines = placeholder
+    placeholderKeys = placeholder
     super.init(app)
   }
 
-  private let placeholderLines: [String]
+  private let placeholderKeys: [String]
 
-  override var placeholder: [String]? { placeholderLines }
+  override var placeholder: [String]? { placeholderKeys.map { tr($0) } }
 
   override var title: String { "" }
 
   override var location: String { "" }
 
-  override var accent: Rgb { Palette.outline }
+  override var accent: Rgb { colors.outline }
 
   override func fetch() async throws -> [Entry] { [] }
 

@@ -144,10 +144,10 @@ struct ShellTerminalTests {
     #expect(t.cell(1, 0).style.fg == Rgb(0xff0000))
     #expect(t.cell(2, 0).style.fg == Rgb(0x010203))
     #expect(t.cell(2, 0).style.bg == Rgb(0x080808))
-    #expect(t.cell(3, 0).style == Style())
+    #expect(t.cell(3, 0).style == ShellTerminal.plain)
     // 反転は前景と背景を入れ替えて塗る。
-    #expect(t.cell(4, 0).style.fg == Palette.background)
-    #expect(t.cell(4, 0).style.bg == Palette.text)
+    #expect(t.cell(4, 0).style.fg == .defaultBackground)
+    #expect(t.cell(4, 0).style.bg == .defaultForeground)
   }
 
   @Test func brightAndDefaultColors() {
@@ -155,8 +155,8 @@ struct ShellTerminalTests {
     t.write("\u{1b}[92;104ma\u{1b}[39;49mb")
     #expect(t.cell(0, 0).style.fg == Rgb(0x23d18b))
     #expect(t.cell(0, 0).style.bg == Rgb(0x3b8eea))
-    #expect(t.cell(1, 0).style.fg == Palette.text)
-    #expect(t.cell(1, 0).style.bg == Palette.background)
+    #expect(t.cell(1, 0).style.fg == .defaultForeground)
+    #expect(t.cell(1, 0).style.bg == .defaultBackground)
   }
 
   @Test func oscHyperlinkSurvivesSgrReset() {
@@ -205,7 +205,7 @@ struct ShellTerminalTests {
     #expect(t.x == 0 && t.y == 0)
     #expect(!t.bracketedPaste)
     t.write("x")
-    #expect(t.cell(0, 0).style == Style())
+    #expect(t.cell(0, 0).style == ShellTerminal.plain)
   }
 
   @Test func statusQueriesAreAnswered() {

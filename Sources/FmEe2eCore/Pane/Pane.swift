@@ -9,6 +9,7 @@ final class Entry {
     modified: Date? = nil,
     executable: Bool = false,
     mode: Int? = nil,
+    isLink: Bool = false,
     data: Any
   ) {
     self.name = name
@@ -17,6 +18,7 @@ final class Entry {
     self.modified = modified
     self.executable = executable
     self.mode = mode
+    self.isLink = isLink
     self.data = data
   }
 
@@ -28,6 +30,9 @@ final class Entry {
 
   /// 実行権限のあるローカルのファイル。
   let executable: Bool
+
+  /// シンボリックリンク（ローカル・SSH）。フォルダーへのリンクは [isDir] も true。
+  let isLink: Bool
   let size: Int?
   let modified: Date?
 
@@ -163,7 +168,22 @@ class Pane {
   var accent: Rgb { fatalError("accent") }
 
   /// 選んでいる窓のカーソルの行の地の色。
-  var selection: Rgb { Palette.selected }
+  var selection: Rgb { colors.selection ?? colors.selected }
+
+  /// この窓のタブの見た目（設定ファイルの appearance）。
+  var themeKey: ThemeKey { .defaults }
+
+  /// このタブの配色（描いている範囲によらない。上の帯でもタブの色を使うため）。
+  var colors: ThemeColors { Appearance.current.theme(themeKey).colors }
+
+  /// 上の帯に出す容量の項目（Total・Used・Free のうち）。
+  var usageLabels: [String] { ["Total", "Used", "Free"] }
+
+  /// 上の帯に、容量（Total・Used・Free）の代わりに出す文。容量を出すなら nil。
+  var headerText: String? { nil }
+
+  /// 一覧に使える行数。前回描いたときの値（PgUp・PgDn の幅に使う）。
+  private(set) var visibleRows = 0
 
   /// 一覧の代わりに表示する案内（iCloudのログイン前など）。
   var placeholder: [String]? { nil }
@@ -348,12 +368,13 @@ class Pane {
       title: title,
       titleStyle: bg.copyWith(fg: accent, bold: focused)
     )
-    screen.text(x + 1, y + 1, truncateLeft(location, w - 2), bg.copyWith(fg: Palette.muted))
+    screen.text(x + 1, y + 1, truncateLeft(location, w - 2), bg.copyWith(fg: Palette.location))
     drawBody(screen, x + 1, y + 2, w - 2, h - 3, focused: focused)
   }
 
   /// 枠の中の一覧（[x]・[y] から幅 [width]・[rows] 行）。スクロール位置は右の枠の上に出す。
   func drawBody(_ screen: Screen, _ x: Int, _ y: Int, _ width: Int, _ rows: Int, focused: Bool) {
+    visibleRows = rows
     let bg = Style()
     if let placeholder {
       // 案内は窓の幅で折り返す。
@@ -364,19 +385,19 @@ class Pane {
       return
     }
     if loading && !(keepsEntriesWhileLoading && !entries.isEmpty) {
-      screen.text(x + 1, y, "読み込み中…", bg.copyWith(fg: Palette.muted))
+      screen.text(x + 1, y, tr("pane.loading"), bg.copyWith(fg: Palette.muted))
       return
     }
     if let error {
-      let lines = wrap("読み込めません: \(errorMessage(error))", width - 2)
+      let lines = wrap(tr("pane.load_failed", ["message": errorMessage(error)]), width - 2)
       for i in 0..<max(0, min(lines.count, rows - 2)) {
         screen.text(x + 1, y + i, lines[i], bg.copyWith(fg: Palette.error))
       }
-      screen.text(x + 1, y + min(lines.count, rows - 2) + 1, "L: 再読み込み", bg.copyWith(fg: Palette.muted))
+      screen.text(x + 1, y + min(lines.count, rows - 2) + 1, tr("pane.reload_hint"), bg.copyWith(fg: Palette.muted))
       return
     }
     if entries.isEmpty {
-      screen.text(x + 1, y, "このフォルダーは空です", bg.copyWith(fg: Palette.muted))
+      screen.text(x + 1, y, tr("pane.empty_folder"), bg.copyWith(fg: Palette.muted))
       return
     }
 
@@ -386,13 +407,14 @@ class Pane {
     while i < rows && scroll + i < entries.count {
       let index = scroll + i
       let entry = entries[index]
-      let style = index == cursor ? bg.copyWith(bg: focused ? selection : Palette.surfaceHigh) : bg
+      // 選んでいない窓のカーソルの行は、同じ色を8割透かす。
+      let style = index == cursor ? bg.copyWith(bg: focused ? selection : selection.withOpacity(0.2)) : bg
       screen.fill(x, y + i, width, 1, style)
       drawRow(screen, entry, x, y + i, width, style, marked: isMarked(entry))
       i += 1
     }
     if entries.count == 1 && entries[0].isParent && rows > 1 {
-      screen.text(x + 2, y + 1, "このフォルダーは空です", bg.copyWith(fg: Palette.muted))
+      screen.text(x + 2, y + 1, tr("pane.empty_folder"), bg.copyWith(fg: Palette.muted))
     }
     // スクロール位置。
     if entries.count > rows {
@@ -405,18 +427,20 @@ class Pane {
   func drawRow(_ screen: Screen, _ entry: Entry, _ x: Int, _ y: Int, _ width: Int, _ style: Style, marked: Bool) {
     let showDate = width >= 50
     let nameWidth = width - 2 - 1 - 9 - (showDate ? 15 : 0) - 1
-    // マーク > 実行ファイル（赤）> 隠しファイル（水色）> フォルダー の順に優先する。
+    // マーク > シンボリックリンク > 実行ファイル（赤）> 隠しファイル（水色）> フォルダー の順に優先する。
     let nameColor =
       marked
-      ? Palette.lime
-      : entry.executable
-        ? Palette.red
+      ? Palette.marked
+      : entry.isLink
+        ? Palette.symlink
+        : entry.executable
+        ? Palette.executable
         : !entry.isParent && entry.name.hasPrefix(".")
-          ? Palette.cyan
+          ? Palette.hidden
           : entry.isDir
-            ? Palette.purple
+            ? Palette.directory
             : fileColor
-    screen.text(x, y, marked ? "*" : " ", style.copyWith(fg: Palette.lime, bold: true))
+    screen.text(x, y, marked ? "*" : " ", style.copyWith(fg: Palette.marked, bold: true))
     screen.text(
       x + 2, y, truncate(entry.isDir && !entry.isParent ? "\(entry.name)/" : entry.name, nameWidth),
       style.copyWith(fg: nameColor, bold: marked)
@@ -463,6 +487,9 @@ class Pane {
 
   /// [targets] を、P で貼り付ける対象にする（C・M）。対応しなければ nil。
   func makeClip(_ targets: [Mark], move: Bool) -> Clip? { nil }
+
+  /// C・M（F2・F3）で選べるか（[makeClip] を持ち、読むだけの場所でない）。
+  var canClip: Bool { false }
 }
 
 /// パスで扱える窓（ローカルと SSH の接続先）の共通部分。ファイルの操作は各タブのコマンドが行う。

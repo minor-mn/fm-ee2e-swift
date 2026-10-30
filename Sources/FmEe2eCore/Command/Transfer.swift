@@ -33,11 +33,11 @@ class DriveTransferCommand: Command {
     let drive = c.workspace.drive
     let local = c.workspace.local
     if drive.state != .ready {
-      await app.showError("Google Driveを使えません。")
+      app.showStatus(tr("transfer.drive_unavailable"))
       return
     }
     if !drive.ready {
-      await app.showError("Google Driveのフォルダーを読み込み中です")
+      app.showStatus(tr("transfer.drive_loading"))
       return
     }
     let targets = c.targets
@@ -53,10 +53,10 @@ class DriveTransferCommand: Command {
     let conflicts = Conflicts { path in await askConflict(app, path) }
     var errors: [String] = []
     do {
-      try await app.withUpdatingProgress("\(title)中…") { update in
+      try await app.withUpdatingProgress(tr("transfer.in_progress", ["title": title])) { update in
         for mark in targets {
           let before = errors.count
-          try await send(c, mark, conflicts, { name in update("\(self.title)中… \(name)") }, &errors)
+          try await send(c, mark, conflicts, { name in update(tr("transfer.in_progress_item", ["title": self.title, "name": name])) }, &errors)
           // 失敗した項目のマークは残す。
           if errors.count == before {
             pane.marks.removeAll { _, m in m.parent == mark.parent && m.entry.name == mark.entry.name }
@@ -83,10 +83,10 @@ final class DriveUpload: DriveTransferCommand {
   /// ファンクションキーの帯で、転送の向き（左→右・右→左）を見せる。
   override var label: String { "\(super.label) →" }
 
-  override var title: String { "アップロード" }
+  override var title: String { tr("transfer.upload") }
 
   override func message(_ c: CommandContext, _ label: String) -> String {
-    "\(label)を暗号化して Google Drive の \(c.workspace.drive.location) にアップロードします。"
+    tr("transfer.drive_upload_confirm", ["label": label, "location": c.workspace.drive.location])
   }
 
   override func send(
@@ -170,10 +170,10 @@ final class DriveUpload: DriveTransferCommand {
 final class DriveDownload: DriveTransferCommand {
   override var label: String { "\(super.label) ←" }
 
-  override var title: String { "ダウンロード" }
+  override var title: String { tr("transfer.download") }
 
   override func message(_ c: CommandContext, _ label: String) -> String {
-    "\(label)を復号して \(c.workspace.local.dir) にダウンロードします。"
+    tr("transfer.drive_download_confirm", ["label": label, "dir": c.workspace.local.dir])
   }
 
   override func send(
@@ -323,10 +323,10 @@ class FolderCopyCommand: Command {
       return
     }
     var errors: [String] = []
-    await app.withUpdatingProgress("\(title)中…") { update in
+    await app.withUpdatingProgress(tr("transfer.in_progress", ["title": title])) { update in
       for (index, job) in jobs.enumerated() {
         let name = job.mark.entry.name
-        update("\(title)中（\(index + 1)/\(jobs.count)）\(name)")
+        update(tr("transfer.in_progress_count", ["title": title, "index": index + 1, "total": jobs.count, "name": name]))
         do {
           if job.overwrite {
             try await moveToTrash(job.to)
@@ -353,11 +353,11 @@ class ICloudTransferCommand: FolderCopyCommand {
   override func prepare(_ c: CommandContext) async -> Bool {
     let icloud = c.workspace.icloud
     if icloud.state != .ready {
-      await c.app.showError("iCloud Driveは使えません。")
+      c.app.showStatus(tr("transfer.icloud_unavailable"))
       return false
     }
     if !icloud.ready {
-      await c.app.showError("iCloud Driveのフォルダーを読み込み中です")
+      c.app.showStatus(tr("transfer.icloud_loading"))
       return false
     }
     return true
@@ -368,10 +368,10 @@ class ICloudTransferCommand: FolderCopyCommand {
 final class ICloudUpload: ICloudTransferCommand {
   override var label: String { "\(super.label) →" }
 
-  override var title: String { "アップロード" }
+  override var title: String { tr("transfer.upload") }
 
   override func message(_ c: CommandContext, _ label: String) -> String {
-    "\(label)を \(c.workspace.icloud.location) にアップロードします。"
+    tr("transfer.icloud_upload_confirm", ["label": label, "location": c.workspace.icloud.location])
   }
 
   override func source(_ c: CommandContext) -> LocalPane { c.workspace.local }
@@ -383,10 +383,10 @@ final class ICloudUpload: ICloudTransferCommand {
 final class ICloudDownload: ICloudTransferCommand {
   override var label: String { "\(super.label) ←" }
 
-  override var title: String { "ダウンロード" }
+  override var title: String { tr("transfer.download") }
 
   override func message(_ c: CommandContext, _ label: String) -> String {
-    "\(label)を \(c.workspace.local.dir) にダウンロードします。"
+    tr("transfer.icloud_download_confirm", ["label": label, "dir": c.workspace.local.dir])
   }
 
   override func source(_ c: CommandContext) -> LocalPane { c.workspace.icloud }
@@ -398,10 +398,10 @@ final class ICloudDownload: ICloudTransferCommand {
 class LocalCopyCommand: FolderCopyCommand {
   override var label: String { "Copy G" }
 
-  override var title: String { "コピー" }
+  override var title: String { tr("transfer.copy") }
 
   override func message(_ c: CommandContext, _ label: String) -> String {
-    "\(label)を \(dest(c).dir) にコピーします。"
+    tr("transfer.copy_confirm", ["label": label, "dir": dest(c).dir])
   }
 }
 
@@ -477,7 +477,7 @@ class ScpCommand: Command {
     let local = near(c)
     let ssh = remotePane(c)
     guard let remote = ssh.ssh else {
-      await app.showError("SSH の接続先を選んでください。")
+      app.showStatus(tr("transfer.ssh_not_selected"))
       return
     }
     if !(await local.checkWritable()) {
@@ -487,8 +487,8 @@ class ScpCommand: Command {
     if !ssh.ready || targets.isEmpty {
       return
     }
-    let label = targets.count == 1 ? targets[0].entry.name : "\(targets.count)項目"
-    if !(await app.confirm(title, "\(label) を\(title)します", yes: title)) {
+    let label = targets.count == 1 ? targets[0].entry.name : tr("command.items", ["count": targets.count])
+    if !(await app.confirm(title, tr("transfer.scp_confirm", ["label": label, "title": title]), yes: title)) {
       return
     }
     let dir = destDir(c)
@@ -527,10 +527,10 @@ class ScpCommand: Command {
       return
     }
     var errors: [String] = []
-    await app.withUpdatingProgress("\(title)中…") { update in
+    await app.withUpdatingProgress(tr("transfer.in_progress", ["title": title])) { update in
       for (index, job) in jobs.enumerated() {
         let name = job.mark.entry.name
-        update("\(title)中（\(index + 1)/\(jobs.count)）\(name)")
+        update(tr("transfer.in_progress_count", ["title": title, "index": index + 1, "total": jobs.count, "name": name]))
         var staging: String?
         var cleanStaging = true
         do {
@@ -545,7 +545,7 @@ class ScpCommand: Command {
           } else {
             let exists = try await destExists(remote, job.to)
             if exists && !job.overwrite {
-              throw SshException("転送中に同名の項目が作られました。再実行して上書きを選んでください。")
+              throw SshException(tr("transfer.created_during_transfer"))
             }
             if exists {
               try await destMove(remote, job.to, previous)
@@ -559,7 +559,7 @@ class ScpCommand: Command {
                   try await destMove(remote, previous, job.to)
                 } catch {
                   cleanStaging = false
-                  throw SshException("置き換えに失敗しました。元のデータは \(previous) に残しています。")
+                  throw SshException(tr("transfer.replace_failed", ["previous": previous]))
                 }
               }
               throw moveError
@@ -574,7 +574,7 @@ class ScpCommand: Command {
           do {
             try await removeStaging(remote, staging)
           } catch {
-            errors.append("一時フォルダー \(staging) を削除できません: \(errorMessage(error))")
+            errors.append(tr("transfer.staging_remove_failed", ["staging": staging, "error": errorMessage(error)]))
           }
         }
       }
@@ -592,7 +592,7 @@ class ScpCommand: Command {
 class LocalScp: ScpCommand {
   override var label: String { "\(super.label) →" }
 
-  override var title: String { "アップロード" }
+  override var title: String { tr("transfer.upload") }
 
   override var destContext: PathContext { .posix }
 
@@ -627,7 +627,7 @@ class LocalScp: ScpCommand {
 class SshScp: ScpCommand {
   override var label: String { "\(super.label) ←" }
 
-  override var title: String { "ダウンロード" }
+  override var title: String { tr("transfer.download") }
 
   override var destContext: PathContext { p }
 
@@ -667,7 +667,7 @@ class SshScp: ScpCommand {
 
 /// 左の SSH の接続先の対象を、そこからつないだ右の SSH の接続先の開いているフォルダーへ送る。scp は左の接続先で実行する。
 final class LeftSshScp: LocalScp {
-  override var title: String { "右へコピー" }
+  override var title: String { tr("transfer.copy_right") }
 
   override func near(_ c: CommandContext) -> Pane { c.workspace.sshLeft }
 }
@@ -695,7 +695,7 @@ final class RightLocalUpload: LocalScp {
 final class RightSshScp: ScpCommand {
   override var label: String { "\(super.label) ←" }
 
-  override var title: String { "左へコピー" }
+  override var title: String { tr("transfer.copy_left") }
 
   override func near(_ c: CommandContext) -> Pane { c.workspace.sshLeft }
 

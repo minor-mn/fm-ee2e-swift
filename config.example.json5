@@ -1,0 +1,223 @@
+// fm-ee2e の設定（自分用）。~/.config/fm-ee2e/config.json5 にコピーして使う。
+// 書ける項目は config.example.json5 を見る。
+{
+  // 画面の言葉（languages/<language>.json5）。ja（日本語）・en（英語）。書かなければ ja。
+  language: "en",
+
+  // 右の窓に出すタブ（Tab で切り替える）。false にしたタブは出さない。
+  right_tabs: {
+    google_drive: true,
+    git: true,
+    ssh: true,
+    icloud: true,
+    local: true,
+  },
+
+  appearance: {
+    window: {
+      // 窓の背景の不透明度（0〜1）
+      opacity: 0.9,
+      // 窓の後ろをぼかす
+      blur: true,
+      background: {
+        gradient: {
+          from: "#1B1030",
+          to: "#0B2A2A",
+          angle: 90,
+        },
+      },
+      // 上の帯（タイトルの枠）の中の背景
+      header: {
+        background: {
+          color: "#000000",
+        },
+      },
+      // ステータスバー（下に出て4秒で消える状態の表示）の文字
+      statusbar: {
+        color: "#5CD8FF",
+      },
+      font: {
+        // 上から探して、入っている最初のフォントを使う。どれもなければ SF Mono。
+        family: [
+          "HackGen Console",
+          "Menlo",
+        ],
+        size: 13,
+      },
+    },
+
+    // Tab: Default
+    default: {
+      text: {
+        color: "#E6E6E6",
+      },
+      // 窓の先頭の場所（パス）。タブごとにも書ける。
+      location: {
+        color: "#666666",
+      },
+    },
+
+    // Tab: Local
+    local: {
+      background: {
+        color: "#222244",
+        image: {
+          path: "~/.config/fm-ee2e/images/local.webp",
+          opacity: 0.4,
+          mode: "center",
+          align: "bottom_left",
+          max_width: 0.5,
+          max_height: 0.5,
+        },
+      },
+      // git status のブロックの見出し（書かなければ subtext の色の太字）。
+      sections: {
+        staged: {
+          color: "#2EE0A8",
+          bold: true,
+          underline: false,
+        },
+        unmerged: {
+
+        },
+      },
+    },
+
+    // Tab: Git
+    git: {
+      accent: {
+        color: "#FF5FA0",
+      },
+      background: {
+        color: "#331122",
+        image: {
+          path: "~/.config/fm-ee2e/images/github.webp",
+          // 不透明度（透過率 3割）
+          opacity: 0.7,
+          // fill（覆う）・fit（全体が入る）・center（元の大きさ）・tile（並べる）
+          mode: "center",
+          align: "bottom_right",
+          max_width: 0.4,
+          max_height: 0.4,
+        },
+      },
+      // git status のブロックの見出し（書かなければ subtext の色の太字）。
+      sections: {
+        staged: {
+          color: "#2EE0A8",
+          bold: true,
+          underline: false,
+        },
+        unmerged: {
+          color: "#FF7A6B",
+          bold: true,
+          underline: false,
+        },
+        not_staged: {
+          color: "#FF9F43",
+          bold: true,
+          underline: false,
+        },
+        untracked: {
+          color: "#98A1B0",
+          bold: true,
+          underline: false,
+        },
+      },
+      // git status の右の列の色。conflict は競合（unmerged）のすべて。
+      status: {
+        modified: {
+          color: "#FF9F43",
+        },
+        new_file: {
+          color: "#2EE0A8",
+        },
+        deleted: {
+          color: "#FF4D5E",
+        },
+        renamed: {
+          color: "#5CD8FF",
+        },
+        copied: {
+          color: "#5CD8FF",
+        },
+        type: {
+          color: "#98A1B0",
+        },
+        conflict: {
+          color: "#FF7A6B",
+        },
+      },
+      // git diff の、追加した行・消した行の地（半分透ける）
+      diff: {
+        added: {
+          background: {
+            color: "#12392D80",
+          },
+        },
+        removed: {
+          background: {
+            color: "#481C2480",
+          },
+        },
+      },
+    },
+
+    // Tab: SSH
+    ssh: {
+      background: {
+        color: "#112255",
+        image: {
+          path: "~/.config/fm-ee2e/images/ssh.webp",
+          // 不透明度（透過率 3割）
+          opacity: 0.7,
+          // fill（覆う）・fit（全体が入る）・center（元の大きさ）・tile（並べる）
+          mode: "center",
+          align: "bottom_right",
+          max_width: 0.4,
+          max_height: 0.4,
+        },
+      },
+
+    },
+    // Tab: GoogleDrive
+    google_drive: {
+      // 上の帯に Used（開いているフォルダーの中身の大きさ）を出す。書かなければ true。
+      show_used: true,
+      background: {
+        color: "#113322",
+        image: {
+          path: "~/.config/fm-ee2e/images/google.webp",
+          // 不透明度（透過率 3割）
+          opacity: 0.7,
+          // fill（覆う）・fit（全体が入る）・center（元の大きさ）・tile（並べる）
+          mode: "center",
+          align: "bottom_right",
+          max_width: 0.4,
+          max_height: 0.4,
+        },
+      },
+    },
+
+    // Tab: iCloud
+    icloud: {
+      show_used: true,
+      accent: {
+        color: "#FFFF66",
+      },
+      background: {
+        color: "#222211",
+        image: {
+          path: "~/.config/fm-ee2e/images/apple.webp",
+          // 不透明度（透過率 3割）
+          opacity: 0.7,
+          // fill（覆う）・fit（全体が入る）・center（元の大きさ）・tile（並べる）
+          mode: "center",
+          align: "bottom_right",
+          max_width: 0.4,
+          max_height: 0.4,
+        },
+      },
+    },
+  },
+}

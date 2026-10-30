@@ -1,25 +1,6 @@
-import Foundation
+import AppKit
 
-/// 画像・動画のプレビューの描き方。
-enum PreviewMode: String {
-  case off
-
-  /// 文字（▀）の文字色と背景色で、1文字に上下2つの画素を描く。どの端末でも出る。
-  case blocks
-
-  /// iTerm2 の画像表示。
-  case iterm
-
-  var label: String {
-    switch self {
-    case .off: "off"
-    case .blocks: "dmp"
-    case .iterm: "iTerm"
-    }
-  }
-}
-
-/// ローカルの窓のカーソルの画像・動画を、反対側の窓の上に重ねて出す。
+/// ローカルの窓のカーソルの画像・動画（SSH の窓では画像だけ）を、反対側の窓の上に重ねて出す。
 final class PreviewOverlay {
   init(_ app: App) {
     self.app = app
@@ -27,111 +8,74 @@ final class PreviewOverlay {
 
   let app: App
 
-  /// V で off → dmp → iTerm → off の順に切り替える。iTerm2 は画像を出すたびに確認するので
-  /// （断るとデータが文字で出る）、最初はオフ。
-  var mode = PreviewMode.off
+  /// V でオン・オフを切り替える。最初はオフ。
+  var on = false
 
-  /// 重ねているプレビュー（描き方と [LocalPane.previewId]）。
+  /// 重ねているプレビュー（[previewId]）。
   private var id: String?
   private var timer: OneShotTimer?
 
-  /// 作ったプレビュー。iTerm2 は JPEG の base64、標準は [PreviewPixels]。作れなかったものは nil。
-  private var previews = OrderedMap<String, Any?>()
+  /// 作ったプレビュー。作れなかったものは nil。
+  private var previews = OrderedMap<String, NSImage?>()
 
-  /// 窓の大きさに縮めた画素（縮める元・幅・高さごと）。
-  private var fitted: (source: PreviewPixels, w: Int, h: Int, pixels: PreviewPixels)?
-
-  /// 次の描き方にする（V）。
-  func cycleMode() {
-    let previous = mode
-    switch previous {
-    case .off: mode = .blocks
-    case .blocks where canShowImages: mode = .iterm
-    default: mode = .off
-    }
-    if previous == .iterm {
-      // iTerm2 の確認で断ると画像のデータが文字で画面に出るので、やめるときは全体を描き直して消す。
-      app.repaint()
-    }
-  }
-
-  /// プレビューがオンで、ローカルの窓 [local] のカーソルが画像か動画に乗っていれば、その項目と種類。
-  func target(_ local: LocalPane) -> (Entry, PreviewKind)? {
-    if mode == .off || !local.ready {
+  /// プレビューがオンで、窓 [pane] のカーソルがプレビューできるファイルに乗っていれば、その項目と種類。
+  /// SSH の窓では、画像だけ（動画は大きく、ファイルをまるごと読まないと1コマも出せないため）。
+  func target(_ pane: Pane) -> (Entry, PreviewKind)? {
+    if !on || !pane.ready {
       return nil
     }
-    guard let entry = local.current, !entry.isDir, let kind = previewKindOf(entry.name) else {
+    guard let entry = pane.current, !entry.isDir, let kind = previewKindOf(entry.name) else {
       return nil
     }
-    return (entry, kind)
+    if let ssh = pane as? SshPane {
+      return kind == .image && ssh.ssh != nil && entry.data is RemoteEntry ? (entry, kind) : nil
+    }
+    return pane is LocalPane ? (entry, kind) : nil
   }
 
-  /// [local] の [entry] のプレビューの窓を描く。画像はカーソルが少し止まってから作る。
-  func draw(_ screen: Screen, _ local: LocalPane, _ entry: Entry, _ kind: PreviewKind, _ x: Int, _ y: Int, _ w: Int, _ h: Int) {
+  /// [pane] の [entry] のプレビューの窓を描く。画像はカーソルが少し止まってから作る。
+  func draw(_ screen: Screen, _ pane: Pane, _ entry: Entry, _ kind: PreviewKind, _ x: Int, _ y: Int, _ w: Int, _ h: Int) {
     let bg = Style()
-    let mode = mode
-    let id = "\(mode.rawValue)|\(local.previewId(entry))"
+    let id = previewId(pane, entry)
     if id != self.id {
       self.id = id
       timer?.cancel()
       if !previews.containsKey(id) {
         timer = OneShotTimer(milliseconds: 150) { [weak self] in
-          Task { await self?.load(local, id, entry, kind, mode) }
+          Task { await self?.load(pane, id, entry, kind) }
         }
       }
     }
     screen.fill(x, y, w, h, bg)
-    screen.box(
-      x, y, w, h, bg.copyWith(fg: Palette.outline),
-      title: "Preview (\(mode.label))",
-      titleStyle: bg.copyWith(fg: Palette.lime)
-    )
+    screen.box(x, y, w, h, bg.copyWith(fg: Palette.outline), title: "Preview", titleStyle: bg.copyWith(fg: Palette.lime))
     screen.text(x + 1, y + 1, truncate(entry.name, w - 2), bg.copyWith(fg: Palette.muted))
-    let data = previews[id] ?? nil
-    if data == nil {
-      screen.text(x + 2, y + 2, previews.containsKey(id) ? "プレビューできません" : "読み込み中…", bg.copyWith(fg: Palette.muted))
-    } else if let pixels = data as? PreviewPixels {
-      drawPixels(screen, pixels, x + 1, y + 2, w - 2, h - 3)
-    } else if let base64 = data as? String {
-      let padding = base64.hasSuffix("==") ? 2 : (base64.hasSuffix("=") ? 1 : 0)
-      screen.image = ScreenImage(
-        x + 1, y + 2, w - 2, h - 3, id, base64,
-        name: Data(entry.name.utf8).base64EncodedString(),
-        size: base64.utf8.count / 4 * 3 - padding
-      )
-    }
-  }
-
-  /// 画素を「▀」で描く（文字色が上、背景色が下の画素）。枠の中央に置く。
-  private func drawPixels(_ screen: Screen, _ pixels: PreviewPixels, _ x: Int, _ y: Int, _ w: Int, _ h: Int) {
-    if fitted == nil || fitted!.source !== pixels || fitted!.w != w || fitted!.h != h {
-      fitted = (pixels, w, h, pixels.fit(w, h * 2))
-    }
-    let fitted = fitted!.pixels
-    let left = x + (w - fitted.width) / 2
-    let rows = (fitted.height + 1) / 2
-    let top = y + (h - rows) / 2
-    for row in 0..<rows {
-      for col in 0..<fitted.width {
-        let upper = fitted.at(col, row * 2)
-        let lower = row * 2 + 1 < fitted.height ? Rgb(fitted.at(col, row * 2 + 1)) : Palette.background
-        screen.text(left + col, top + row, "▀", Style(fg: Rgb(upper), bg: lower))
-      }
-    }
-  }
-
-  private func load(_ local: LocalPane, _ id: String, _ entry: Entry, _ kind: PreviewKind, _ mode: PreviewMode) async {
-    var data: Any?
-    // 作れなければ「プレビューできません」と出す。
-    if mode == .iterm {
-      let bytes = try? await local.preview(entry) { path, work in await makePreview(path, kind, work) }
-      data = (bytes ?? nil)?.base64EncodedString()
+    if let image = previews[id] ?? nil {
+      screen.image = ScreenImage(x + 1, y + 2, w - 2, h - 3, image)
     } else {
-      data = (try? await local.preview(entry) { path, work in await makePreviewPixels(path, kind, work) }) ?? nil
+      screen.text(x + 2, y + 2, previews.containsKey(id) ? tr("preview_overlay.unavailable") : tr("preview_overlay.loading"), bg.copyWith(fg: Palette.muted))
+    }
+  }
+
+  /// [entry] のプレビュー用の名前。変わったら作り直す。
+  private func previewId(_ pane: Pane, _ entry: Entry) -> String {
+    if let local = pane as? LocalPane {
+      return local.previewId(entry)
+    }
+    let modified = entry.modified.map { "\($0.timeIntervalSince1970)" } ?? "null"
+    return "\(pane.location)/\(entry.name)|\(entry.size.map(String.init) ?? "null")|\(modified)"
+  }
+
+  private func load(_ pane: Pane, _ id: String, _ entry: Entry, _ kind: PreviewKind) async {
+    // 作れなければ「プレビューできません」と出す。
+    var image: NSImage?
+    if let local = pane as? LocalPane {
+      image = (try? await local.preview(entry) { path in await makePreview(path, kind) }) ?? nil
+    } else if let ssh = pane as? SshPane, let connection = ssh.ssh {
+      image = (try? await connection.run("cat \(shQuote(ssh.pathOf(entry)))")).flatMap(makePreview)
     }
     // 古いものから捨て、最近の分だけ覚えておく。
     previews.removeValue(forKey: id)
-    previews[id] = .some(data)
+    previews[id] = .some(image)
     if previews.count > 30, let first = previews.keys.first {
       previews.removeValue(forKey: first)
     }

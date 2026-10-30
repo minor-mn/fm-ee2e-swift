@@ -86,7 +86,7 @@ func runCommand(_ command: Command, _ workspace: Workspace) async {
     ? pane.cursorTargets(includeParent: command.includesParent)
     : pane.targetsFor(includeParent: command.includesParent)
   if command.single && targets.count > 1 {
-    await workspace.app.showError("1項目だけを選んでください。")
+    workspace.app.showStatus(tr("command.select_one"))
     return
   }
   await command.run(CommandContext(workspace, pane, targets))
@@ -106,7 +106,7 @@ final class RightTransfer: Command {
 
 /// [targets] の数を表す「「名前」」か「N項目」。
 func quotedLabel(_ targets: [Mark]) -> String {
-  targets.count == 1 ? "「\(targets[0].entry.name)」" : "\(targets.count)項目"
+  targets.count == 1 ? tr("command.quoted_name", ["name": targets[0].entry.name]) : tr("command.items", ["count": targets.count])
 }
 
 /// [name] が決まっていれば [apply] し（失敗はエラーを出す）、その名前にカーソルを合わせて [pane] を読み直す。

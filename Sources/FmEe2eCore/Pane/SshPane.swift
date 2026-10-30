@@ -57,6 +57,8 @@ final class SshPane: PathPane {
   /// つなぐ前は、カーソル移動・ヘルプ・終了だけ。
   override func allowsKey(_ id: String) -> Bool { browsing || Self.keysBeforeConnect.contains(id) }
 
+  override var canClip: Bool { ssh != nil && !readOnly }
+
   override func makeClip(_ targets: [Mark], move: Bool) -> Clip? {
     guard let current = ssh else { return nil }
     return SshClip(current, targets.map(pathOfMark), move: move)
@@ -125,33 +127,35 @@ final class SshPane: PathPane {
   /// ~/.ssh/config がない（SSH を使えない）。
   private var configMissing: Bool { ssh == nil && !(message?.isEmpty ?? true) }
 
-  override var accent: Rgb { Palette.cyan }
+  override var accent: Rgb { colors.accent ?? colors.cyan }
 
-  override var selection: Rgb { Palette.cyanDark }
+  override var selection: Rgb { colors.selection ?? colors.cyanDark }
+
+  override var themeKey: ThemeKey { .ssh }
 
   override var placeholder: [String]? { message }
 
   override func fetch() async throws -> [Entry] {
     let current = ssh
     if current == nil && waiting {
-      message = ["左の SSH で接続先を選んでください。"]
+      message = [tr("ssh_pane.placeholder.choose_host")]
       return []
     }
     if current == nil, let via {
       let hosts = try await readRemoteSshHosts(via)
-      message = hosts == nil ? ["\(via.host) に ~/.ssh/config がありません。"] : (hosts!.isEmpty ? [] : nil)
+      message = hosts == nil ? [tr("ssh_pane.placeholder.no_remote_config", ["host": via.host])] : (hosts!.isEmpty ? [] : nil)
       return (hosts ?? []).map { Entry(name: $0, isDir: false, data: SshHost($0)) }
     }
     guard let current else {
       let config = p.join(homeDir, ".ssh", "config")
       let hosts = try await readSshHosts(config)
       // ~/.ssh/config がなければ使えないことを出し、あっても Host がなければ何も出さない。
-      message = !FileManager.default.fileExists(atPath: config) ? ["SSHは使えません。(~/.ssh/configを配置すれば使えます)"] : (hosts.isEmpty ? [] : nil)
+      message = !FileManager.default.fileExists(atPath: config) ? [tr("ssh_pane.placeholder.no_config")] : (hosts.isEmpty ? [] : nil)
       return hosts.map { Entry(name: $0, isDir: false, data: SshHost($0)) }
     }
     if !((try? await current.alive()) ?? false) {
       forgetConnection()
-      Task { await app.showError("\(current.host) との接続が切れました。もう一度選んでください。") }
+      Task { await app.showError(tr("ssh_pane.disconnected", ["host": current.host])) }
       return try await fetch()
     }
     message = nil
@@ -170,6 +174,7 @@ final class SshPane: PathPane {
         modified: e.modified,
         executable: !e.isDir && (e.mode ?? 0) & 0x49 != 0,
         mode: e.mode,
+        isLink: e.isLink,
         data: e
       )
     }.sorted { a, b in
@@ -196,7 +201,7 @@ final class SshPane: PathPane {
 
   override func checkWritable() async -> Bool {
     if inArchive {
-      await app.showError("圧縮ファイルの中では使えません（読むだけです）。")
+      app.showStatus(tr("ssh_pane.read_only_archive"))
       return false
     }
     return true
@@ -248,8 +253,10 @@ final class SshPane: PathPane {
         try await goTo(pathOf(entry))
       case is RemoteEntry where isBrowsableArchive(entry.name):
         try await openArchive(entry)
+      case is RemoteEntry where previewKindOf(entry.name) != nil:
+        try await openDownloaded(entry)
       case is RemoteEntry:
-        // ファイルはすべて接続先のエディタで開く。
+        // 画像・動画のほかは、接続先のエディタで開く。
         await editFile(pathOf(entry))
       default:
         break
@@ -259,11 +266,32 @@ final class SshPane: PathPane {
     }
   }
 
+  /// 画像・動画を、手元の一時フォルダー（終了時に消す）にダウンロードして、既定のアプリで開く。Esc で途中でやめられる。
+  private func openDownloaded(_ entry: Entry) async throws {
+    let current = ssh!
+    let temp = try await createOpenTemp()
+    let local = p.join(temp, entry.name)
+    var stop: (() -> Void)?
+    do {
+      try await app.withUpdatingProgress(tr("ssh_pane.downloading", ["name": entry.name]), onEscape: { stop?() }) { _ in
+        try await current.download(pathOf(entry), to: local) { stop = $0 }
+      }
+    } catch {
+      try? FileManager.default.removeItem(atPath: temp)
+      if error is CancellationError {
+        app.showStatus(tr("ssh_pane.download_cancelled", ["name": entry.name]))
+        return
+      }
+      throw error
+    }
+    try await openFile(local)
+  }
+
   /// 圧縮ファイルの中に入る（読むだけ）。一覧は接続先の tar・bsdtar・unzip で読む。
   private func openArchive(_ entry: Entry) async throws {
     let current = ssh!
     let path = pathOf(entry)
-    let archive = try await app.withProgress("「\(entry.name)」を読み込み中…") { try await RemoteArchive.open(current, path) }
+    let archive = try await app.withProgress(tr("ssh_pane.opening_archive", ["name": entry.name])) { try await RemoteArchive.open(current, path) }
     self.archive = archive
     archiveDir = ""
     resetCursor()
@@ -283,7 +311,7 @@ final class SshPane: PathPane {
         try? await current.remove([temp])
       }
     }
-    let path = try await app.withProgress("「\(item.name)」を取り出し中…") { try await archive.extract(item, temp) }
+    let path = try await app.withProgress(tr("ssh_pane.extracting", ["name": item.name])) { try await archive.extract(item, temp) }
     await runInTerminal(
       app,
       "\(current.host):\(PathContext.posix.join(archive.path, item.path))",
@@ -331,29 +359,15 @@ final class SshPane: PathPane {
       if socketDir == nil {
         var template = Array("/tmp/fm-ee2e-ssh.XXXXXX".utf8CString)
         guard mkdtemp(&template) != nil else {
-          throw AppError("一時フォルダーを作れません: \(String(cString: strerror(errno)))")
+          throw AppError(tr("ssh_pane.cannot_make_temp", ["reason": String(cString: strerror(errno))]))
         }
         socketDir = String(cString: template)
       }
       controlPath = p.join(socketDir!, "master")
     }
     let next = Ssh(host, controlPath, via: via)
-    let quiet = await app.withProgress("接続中…") { (try? await next.connectWithoutPrompt()) ?? false }
-    let code =
-      quiet
-      ? 0
-      : try await app.runExternal(
-        {
-          writeStdout("$ ssh \(host)\n")
-          let code = try await next.connect()
-          if code != 0 {
-            writeStdout("\n\(exitStatusText(code))")
-          }
-          return code
-        },
-        waitForKey: { $0 != 0 },
-        enterToReturn: true
-      )
+    let quiet = await app.withProgress(tr("ssh_pane.connecting")) { (try? await next.connectWithoutPrompt()) ?? false }
+    let code = quiet ? 0 : try await connectInTerminal(next)
     if code != 0 {
       await close(next)
       await load(focus: host)
@@ -361,7 +375,7 @@ final class SshPane: PathPane {
     }
     ssh = next
     do {
-      try await goTo(try await app.withProgress("接続中…") { try await next.home() })
+      try await goTo(try await app.withProgress(tr("ssh_pane.connecting")) { try await next.home() })
     } catch {
       await disconnect()
       throw error
@@ -414,6 +428,12 @@ final class SshPane: PathPane {
 
   /// [connection] のマスターの接続を閉じる。[Ssh.via] の接続先に作ったソケットのフォルダーも消す
   /// （つなぐ元の接続が切れていれば消せないが、マスターは1時間使わなければ閉じる）。
+  /// パスワードなどを、枠の中の端末で聞いてつなぐ（GUI 版）。失敗したら出力を残して Enter を待つ。終了コードを返す。
+  private func connectInTerminal(_ connection: Ssh) async throws -> Int {
+    let (executable, args) = try connection.connectCommand()
+    return await runInTerminal(app, "$ ssh \(connection.host)", executable, args, waitAfterExit: { $0 != 0 })
+  }
+
   private func close(_ connection: Ssh) async {
     try? await connection.close()
     if let via = connection.via {
