@@ -86,7 +86,7 @@ final class TerminalModal: Modal, SelectionSource {
   func start(_ executable: String, _ args: [String], workingDirectory: String? = nil) async throws {
     let session = ShellSession(
       terminal,
-      onChange: { [unowned app] in app.requestRender() },
+      onChange: { [weak self] in self?.outputChanged() },
       onExit: { [weak self] in self?.ended($0) }
     )
     self.session = session
@@ -106,6 +106,25 @@ final class TerminalModal: Modal, SelectionSource {
     self.input = input
     app.host.inputFilter = { [weak self] bytes in self?.input?.filter(bytes) ?? bytes }
     app.requestRender()
+  }
+
+  /// 出力を描くのを待っている。
+  private var renderPending = false
+
+  /// 出力が届いたら、1フレーム分待ってから描く。
+  /// スピナーなどが「行を消す」と「書き直す」を別々に送ってくるので、その間を描くと点滅して見える。
+  private func outputChanged() {
+    if renderPending {
+      return
+    }
+    renderPending = true
+    DispatchQueue.main.asyncAfter(deadline: .now() + .milliseconds(16)) { [weak self] in
+      MainActor.assumeIsolated {
+        guard let self else { return }
+        self.renderPending = false
+        self.app.requestRender()
+      }
+    }
   }
 
   /// 始められなかったとき。片付けて閉じる。
@@ -173,7 +192,7 @@ final class TerminalModal: Modal, SelectionSource {
             x + col,
             y + row,
             cell.text,
-            link == nil ? style : style.copyWith(link: link),
+            link == nil ? style : style.copyWith(underline: true, link: link),
             maxWidth: width - col
           )
         }
