@@ -11,8 +11,8 @@ permissions:
 
 jobs:
   build:
-    # Apple Silicon の macOS 26。既定の Xcode 26 に Swift 6.2 以上が入っている。
-    runs-on: macos-26
+    # Apple Silicon の macOS 27 と Xcode 27（Swift 6.4）。
+    runs-on: xcode-27
     steps:
       - uses: actions/checkout@v5
 
