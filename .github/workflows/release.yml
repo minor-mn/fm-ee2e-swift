@@ -1,0 +1,32 @@
+# v から始まるタグ（v1.0.0 など）を push すると、.app を作って zip にし、そのタグの Release に添付する。
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # Apple Silicon の macOS 26。既定の Xcode 26 に Swift 6.2 以上が入っている。
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Build app
+        run: sh scripts/make-app.sh
+
+      # 署名なしでも、バンドル全体をアドホック署名しておくと「壊れている」と出にくい。
+      - name: Sign ad-hoc
+        run: codesign --force --deep -s - .build/fm-ee2e.app
+
+      - name: Zip app
+        run: ditto -c -k --keepParent .build/fm-ee2e.app "fm-ee2e-swift-${GITHUB_REF_NAME}.zip"
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" "fm-ee2e-swift-${GITHUB_REF_NAME}.zip" --title "$GITHUB_REF_NAME" --generate-notes
