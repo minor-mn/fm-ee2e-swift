@@ -23,15 +23,15 @@ jobs:
       - name: Sign ad-hoc
         run: codesign --force --deep -s - .build/fm-ee2e.app
 
-      # アプリと、~/.config にコピーする fm-ee2e フォルダーを1つのフォルダーにまとめる。
+      # アプリと、~/.config にコピーする fm-ee2e フォルダーと、それらを置く install.sh を1つのフォルダーにまとめる。
+      # install.sh が releases/latest/download/fm-ee2e-swift.zip から取れるよう、名前にバージョンを入れない。
       - name: Zip app
         run: |
-          dir="fm-ee2e-swift-${GITHUB_REF_NAME}"
-          mkdir "$dir"
-          cp -R .build/fm-ee2e.app fm-ee2e "$dir/"
-          ditto -c -k --keepParent "$dir" "$dir.zip"
+          mkdir fm-ee2e-swift
+          cp -R .build/fm-ee2e.app fm-ee2e scripts/install.sh fm-ee2e-swift/
+          ditto -c -k --keepParent fm-ee2e-swift fm-ee2e-swift.zip
 
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" "fm-ee2e-swift-${GITHUB_REF_NAME}.zip" --title "$GITHUB_REF_NAME" --generate-notes
+        run: gh release create "$GITHUB_REF_NAME" fm-ee2e-swift.zip --title "$GITHUB_REF_NAME" --generate-notes
