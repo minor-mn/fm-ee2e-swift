@@ -111,7 +111,10 @@ final class ShellTerminal {
         if rune == 7 || (stringEscape && rune == 0x5c /* \ */) {
           state = ""
           osc(sequence)
-        } else if rune != 27 && sequenceLength < 4096 {
+        } else if rune != 27
+          && (sequenceLength < 4096
+            || (sequenceLength < SharedRegister.limit && sequence.hasPrefix(SharedRegister.osc + ";")))
+        {
           appendSequence(scalar)
         }
         stringEscape = rune == 27
@@ -448,9 +451,16 @@ final class ShellTerminal {
     }
   }
 
-  /// OSC のうち、ハイパーリンク（OSC 8: `8;パラメーター;URL`）だけを扱う。URL が空ならリンクを終える。
+  /// OSC のうち、ハイパーリンク（OSC 8: `8;パラメーター;URL`）と共有レジスタ（OSC 7520、[SharedRegister]）
+  /// だけを扱う。URL が空ならリンクを終える。
   private func osc(_ body: String) {
     let parts = body.split(separator: ";", omittingEmptySubsequences: false)
+    if parts.first.map(String.init) == SharedRegister.osc {
+      if let response = SharedRegister.handle(parts) {
+        onResponse?(response)
+      }
+      return
+    }
     if parts.count < 3 || parts[0] != "8" {
       return
     }
