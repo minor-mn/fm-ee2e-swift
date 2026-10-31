@@ -165,13 +165,18 @@ class Ssh {
   func directory(_ path: String) async throws -> String { try await runLine("cd \(shQuote(path)) && pwd -P") }
 
   /// 一覧で開いている場所から、[file] をエディタ（接続先の $EDITOR、なければ vim）で開く。認証済みの接続を共有する。
+  /// $EDITOR は、ssh でログインしたときと同じく、ログインシェルを対話モードで起動して読み込んだ設定から取る。
+  /// エディタは sh から起動するので、ログインシェルが zsh や fish でもよい。
   func interactiveArgs(_ dir: String, file: String) throws -> [String] {
-    try ttyArgs(dir, "exec ${EDITOR:-vim} \(shQuote(file))")
+    let editor = "exec sh -c \(shQuote("exec ${EDITOR:-vim} \"$1\"")) sh \(shQuote(file))"
+    return try ttyArgs(dir, "exec \"${SHELL:-/bin/sh}\" -l -i -c \(shQuote(editor))")
   }
 
-  /// 一覧で開いている場所で、[command] をログインシェルに実行させる。非対話なので、接続先のヒストリーには残らない。
+  /// 一覧で開いている場所で、[command] をログインシェルに実行させる。ssh でログインしたときと同じ環境変数になるよう、
+  /// 対話モード（-i）で起動して、対話シェルでだけ読む設定（~/.bashrc の後半など）も読み込む。
+  /// コマンドは -c で渡すので、接続先のヒストリーには残らない。
   func commandArgs(_ dir: String, _ command: String) throws -> [String] {
-    try ttyArgs(dir, "exec \"${SHELL:-/bin/sh}\" -l -c \(shQuote(command))")
+    try ttyArgs(dir, "exec \"${SHELL:-/bin/sh}\" -l -i -c \(shQuote(command))")
   }
 
   /// 接続先の `sh -c` で git を [args] で実行する引数。[tty] なら端末を割り当てる（push の認証などを聞かれても答えられるように）。
