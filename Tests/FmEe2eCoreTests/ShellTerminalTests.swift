@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 @testable import FmEe2eCore
@@ -214,6 +215,42 @@ struct ShellTerminalTests {
     t.onResponse = { responses.append($0) }
     t.write("\u{1b}[3;5H\u{1b}[6n\u{1b}[5n\u{1b}[c\u{1b}[>c")
     #expect(responses == ["\u{1b}[3;5R", "\u{1b}[0n", "\u{1b}[?1;2c", "\u{1b}[>0;0;0c"])
+  }
+
+  @Test func sharedRegisterIsSharedBetweenTerminals() {
+    SharedRegister.content = nil
+    let a = ShellTerminal(10, 2)
+    let b = ShellTerminal(10, 2)
+    var responses: [String] = []
+    b.onResponse = { responses.append($0) }
+    b.write("\u{1b}]7520;get\u{07}")
+    // 枠の中に何も描かない。
+    a.write("\u{1b}]7520;set;line;YWJjCg==\u{1b}\\ok")
+    #expect(text(a, 0) == "ok")
+    b.write("\u{1b}]7520;get\u{1b}\\")
+    a.write("\u{1b}]7520;set;char;44GC\u{07}")
+    b.write("\u{1b}]7520;get\u{07}")
+    #expect(
+      responses == [
+        "\u{1b}]7520;empty\u{07}",
+        "\u{1b}]7520;line;YWJjCg==\u{07}",
+        "\u{1b}]7520;char;44GC\u{07}",
+      ])
+  }
+
+  @Test func sharedRegisterAcceptsLongContent() {
+    let long = String(repeating: "x", count: 10000)
+    let base64 = Data(long.utf8).base64EncodedString()
+    let t = ShellTerminal(10, 2)
+    t.write("\u{1b}]7520;set;char;\(base64)\u{07}")
+    #expect(SharedRegister.content == SharedRegister.Content(linewise: false, data: Data(long.utf8)))
+  }
+
+  @Test func malformedSharedRegisterSequencesAreIgnored() {
+    SharedRegister.content = SharedRegister.Content(linewise: true, data: Data("keep".utf8))
+    let t = ShellTerminal(10, 2)
+    t.write("\u{1b}]7520;set;word;YQ==\u{07}\u{1b}]7520;set;char;!!\u{07}\u{1b}]7520;set;char\u{07}")
+    #expect(SharedRegister.content == SharedRegister.Content(linewise: true, data: Data("keep".utf8)))
   }
 
   @Test func controlCharacters() {
