@@ -250,4 +250,40 @@ struct GitTests {
     #expect(status.entries.map(\.path).sorted() == ["sub/", "top.txt"])
     #expect(try await g.statusAt(NSTemporaryDirectory()) == nil)
   }
+
+  @Test("タグを作った日の新しい順に読み、注釈付きタグはタグの先のコミットを読む") func tagsNewestFirst() async throws {
+    let repo = try tempRepo()
+    defer { try? FileManager.default.removeItem(atPath: repo) }
+    // 並びを決めるため、コミットとタグの日時を [date] にする。
+    func git(_ args: [String], date: String) async throws {
+      var env = ProcessInfo.processInfo.environment
+      env["GIT_AUTHOR_DATE"] = date
+      env["GIT_COMMITTER_DATE"] = date
+      let result = try await runProcess(
+        "git",
+        ["-c", "user.name=e2e", "-c", "user.email=e2e@example.com"] + args,
+        workingDirectory: repo,
+        environment: env
+      )
+      #expect(result.exitCode == 0, "\(result.stderr)")
+    }
+
+    let g = try #require(try await Git.locate())
+    try await git(["init", "-b", "main"], date: "2026-01-01T00:00:00")
+    #expect(try await g.tags(repo).isEmpty)
+    try await git(["commit", "--allow-empty", "-m", "first"], date: "2026-01-01T00:00:00")
+    try await git(["tag", "-a", "-m", "v1.0.0", "v1.0.0"], date: "2026-01-01T00:00:00")
+    try await git(["commit", "--allow-empty", "-m", "second"], date: "2026-01-02T00:00:00")
+    try await git(["tag", "light"], date: "2026-01-03T00:00:00")
+    try await git(["tag", "-a", "-m", "v2.0.0", "v2.0.0"], date: "2026-01-04T00:00:00")
+
+    let tags = try await g.tags(repo)
+    #expect(tags.map { "\($0.name)|\($0.commit.subject)|\($0.commit.author)" } == [
+      "v2.0.0|second|e2e",
+      "light|second|e2e",
+      "v1.0.0|first|e2e",
+    ])
+    #expect(tags.map(\.commit.date).last == "2026-01-01 00:00")
+    #expect(tags.allSatisfy { $0.commit.hash.count == 40 && $0.commit.hash.hasPrefix($0.commit.shortHash) })
+  }
 }

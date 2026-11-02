@@ -285,7 +285,7 @@ private final class GitActions {
       commands.append("git log")
     }
     if onBranch {
-      commands += ["git log", "git push", "git push --force-with-lease", "git switch -c"]
+      commands += ["git log", "git push", "git push --force-with-lease", "git push --tags", "git switch -c", "git tag", "git tag -a"]
     }
     // pull とブランチのリネームは、ブランチにいるときだけ（一番下）。
     if onBranch && selected[0].text != "(no branch)" {
@@ -347,6 +347,15 @@ private final class GitActions {
       try await renameBranch(pane, root, selected[0].text)
       return
     }
+    if command == "git tag" {
+      let tags = try await app.withProgress(tr("git_commands.running", ["command": "git tag"])) { try await pane.git.tags(root) }
+      await app.showModal { (close: @escaping (()) -> Void) in TagView(app, close, pane.git, root, tags) }
+      return
+    }
+    if command == "git tag -a" {
+      try await createTag(pane, root)
+      return
+    }
     if command.hasPrefix("git push") || command == "git pull" {
       // ブランチがリモートに紐付いていなければ（(no upstream)・(no remote)）、push・pull しない。
       let remote = pane.remote
@@ -371,6 +380,10 @@ private final class GitActions {
     }
     if command == "git push" {
       try await gitInTerminal(pane.git, root, ["push"])
+      return
+    }
+    if command == "git push --tags" {
+      try await gitInTerminal(pane.git, root, ["push", "--tags"])
       return
     }
     if command == "git push --force-with-lease" {
@@ -524,6 +537,23 @@ private final class GitActions {
     }
     try await app.withProgress(tr("git_commands.running", ["command": "git branch -m"])) { try await pane.git.renameBranch(root, current, to) }
     // git status の読み直しは、_run が終わったときに行う。
+  }
+
+  /// タグの名前を聞いて、今の場所（HEAD）に注釈付きタグを作る（git tag -a <名前> -m <名前>）。
+  private func createTag(_ pane: GitPane, _ root: String) async throws {
+    let name = (await app.input(
+      "git tag -a",
+      message: tr("git_commands.tag.new_name"),
+      validate: { value in value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? tr("git_commands.tag.name_required") : nil }
+    ))?.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard let name, !name.isEmpty else {
+      return
+    }
+    if !(try await pane.git.isValidTagName(root, name)) {
+      await app.showError(tr("git_commands.tag.invalid_name", ["name": name]))
+      return
+    }
+    try await app.withProgress(tr("git_commands.running", ["command": "git tag -a"])) { try await pane.git.createTag(root, name) }
   }
 
   /// git の [args]（push・pull など）を、枠の中の端末で実行する（パスワードや SSH のパスフレーズを聞かれたり、エディタが開いたりしても操作できるように）。

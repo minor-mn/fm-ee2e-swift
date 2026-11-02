@@ -565,6 +565,12 @@
     rename: {
       new_name: "New branch name",
     },
+    // git tag
+    tag: {
+      new_name: "Tag name for the current commit (HEAD)",
+      name_required: "Enter a tag name.",
+      invalid_name: "\"{name}\" is not a valid tag name.",
+    },
   },
   log_view: {
     // Key hints for the commit list
@@ -600,11 +606,13 @@
     },
     // List heading ({title} is git log  branch name, etc.)
     heading_count: "{title}  {count} commits",
+    heading_tags: "{title}  {count} tags",
     // When the list is empty
     empty: {
       commits: "No commits yet.",
       file_commits: "No commits for this file yet.",
       files: "No files changed.",
+      tags: "No tags yet.",
     },
     no_diff: "No differences.",
   },

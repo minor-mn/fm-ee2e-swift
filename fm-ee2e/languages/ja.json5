@@ -565,6 +565,12 @@
     rename: {
       new_name: "ブランチの新しい名前",
     },
+    // git tag
+    tag: {
+      new_name: "今の場所（HEAD）に付けるタグの名前",
+      name_required: "タグ名を入力してください。",
+      invalid_name: "「{name}」はタグ名に使えません。",
+    },
   },
   log_view: {
     // コミットの一覧の操作の案内
@@ -600,11 +606,13 @@
     },
     // 一覧の見出し（{title} は git log  ブランチ名 など）
     heading_count: "{title}  {count}件",
+    heading_tags: "{title}  {count}件",
     // 一覧が空のとき
     empty: {
       commits: "コミットはまだありません。",
       file_commits: "このファイルのコミットはまだありません。",
       files: "変わったファイルはありません。",
+      tags: "タグはまだありません。",
     },
     no_diff: "差分はありません。",
   },

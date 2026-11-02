@@ -293,6 +293,58 @@ final class LogView: LogListView {
   }
 }
 
+/// タグの一覧（作った日の新しい順）と、それが指すコミット。Enter で、そのコミットで変わったファイルの一覧を出す。
+final class TagView: LogListView {
+  init(_ app: App, _ close: @escaping (()) -> Void, _ git: Git, _ root: String, _ tags: [GitTag]) {
+    self.git = git
+    self.root = root
+    self.tags = tags
+    // タグ名の列の幅。長すぎるものは切る。
+    nameWidth = min(24, tags.map { textWidth($0.name) }.max() ?? 0)
+    super.init(app, close, "git tag")
+  }
+
+  let git: Git
+  let root: String
+  let tags: [GitTag]
+  private let nameWidth: Int
+
+  override var heading: String { tr("log_view.heading_tags", ["title": title, "count": tags.count]) }
+
+  override var length: Int { tags.count }
+
+  override var empty: String { tr("log_view.empty.tags") }
+
+  override func drawRow(_ screen: Screen, _ y: Int, _ w: Int, _ index: Int, _ style: Style) {
+    let tag = tags[index]
+    let c = tag.commit
+    // 先頭の2文字は、ほかの一覧のマーク（*）と空白に揃える。
+    var x = 2
+    x += screen.text(x, y, padRight(truncate(tag.name, nameWidth), nameWidth), style.copyWith(fg: Palette.lime, bold: true)) + 2
+    x += screen.text(x, y, c.shortHash, style.copyWith(fg: Palette.orange)) + 2
+    x += screen.text(x, y, c.date, style.copyWith(fg: Palette.muted)) + 2
+    x += screen.text(x, y, truncate(c.author, 14), style.copyWith(fg: Palette.cyan)) + 2
+    screen.text(x, y, truncate(c.subject, max(0, w - x - 1)), style)
+  }
+
+  override func open(_ index: Int) async throws {
+    let (app, git, root) = (app, git, root)
+    let tag = tags[index]
+    let commit = tag.commit
+    let files = try await app.withProgress(tr("log_view.running", ["command": "git show"])) { try await git.commitFiles(root, commit.hash) }
+    await app.showModal { (close: @escaping (()) -> Void) in
+      CommitFilesView(
+        app,
+        close,
+        "\(tag.name)  \(commit.shortHash)  \(commit.subject)",
+        files,
+        { try await git.commitDiff(root, commit.hash) },
+        commit.shortHash
+      )
+    }
+  }
+}
+
 /// 1つのファイルが変わったコミットの一覧（名前の変更もたどる）。Enter で、そのコミットでのそのファイルの差分を出す。
 /// 名前が変わったコミットには「旧名 → 新名」を添える。
 final class FileLogView: LogListView {
