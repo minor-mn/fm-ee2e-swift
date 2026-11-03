@@ -1,6 +1,6 @@
 # fm-ee2e-swift
 
-![fm-ee2e-swift の画面](screenshot.png)
+![fm-ee2e-swift の画面](screenshot.webp)
 
 Mac のファイルを、キーボードだけでサクサク整理するアプリです。
 

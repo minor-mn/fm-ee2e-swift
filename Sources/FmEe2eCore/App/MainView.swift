@@ -22,6 +22,8 @@ final class MainView: View, Workspace {
         await ssh.follow(nil, waiting: leftMode == .ssh)
       }
     }
+    // フォーマットの変換（F・F9）に使えるコマンドは、起動時に一度だけ探す。
+    locateConverters()
     Task { await local.load() }
     let (driveChecked, gitFound) = startTabs(config.rightTabs)
     Task { await chooseStartRight(driveChecked, gitFound) }
@@ -288,7 +290,7 @@ final class MainView: View, Workspace {
       if operation == .signOut && (pane as? SshPane)?.ssh == nil {
         return false
       }
-      return !(command.writes && pane.readOnly)
+      return !(command.writes && pane.readOnly) && command.available(pane)
     }
     switch id {
     case "char:c", "char:m", "f2", "f3":
@@ -438,6 +440,7 @@ final class MainView: View, Workspace {
     "f6": .mkdir,
     "f7": .rename,
     "f8": .edit,
+    "f9": .format,
     "f12": .transfer,
     "ctrl:l": .goToPath,
     "char:p": .paste,
@@ -448,6 +451,7 @@ final class MainView: View, Workspace {
     "char:r": .rename,
     "char:k": .mkdir,
     "char:t": .touch,
+    "char:f": .format,
     "char:z": .compress,
     "char:u": .extract,
     "char:o": .signOut,

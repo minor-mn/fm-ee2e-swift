@@ -17,6 +17,9 @@ enum Operation: Hashable {
   case signOut
   case shell
 
+  /// F・F9。ファイルのフォーマットの変換。
+  case format
+
   /// G・F12。右のタブの転送（[Pane.transferCommand]）。
   case transfer
 }
@@ -64,6 +67,9 @@ class Command {
   /// 1項目にしか実行できないか。
   var single: Bool { false }
 
+  /// [pane] の今の状態（カーソルの項目など）で使えるか。使えなければ、キーも効かず、ファンクションキーの帯にも出さない。
+  func available(_ pane: Pane) -> Bool { true }
+
   /// 実行するタブ。ふつうは選んでいるタブ。
   func paneIn(_ workspace: Workspace) -> Pane? { workspace.active }
 
@@ -72,7 +78,7 @@ class Command {
 
 /// [command] を実行する。使えるかを確かめ、対象を確定してから渡す。
 func runCommand(_ command: Command, _ workspace: Workspace) async {
-  guard let pane = command.paneIn(workspace) else {
+  guard let pane = command.paneIn(workspace), command.available(pane) else {
     return
   }
   if command.writes, !(await pane.checkWritable()) {
