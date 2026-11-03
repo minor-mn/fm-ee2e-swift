@@ -23,9 +23,15 @@ class EditCommand: Command {
 }
 
 /// ローカルはこの端末のエディタ、SSH は接続先のエディタで開く（[PathPane.editFile]）。
+/// ローカルの Markdown を反対側の窓にプレビュー（V）しているときは、エディタを選んでいる側の窓の場所だけに開き、
+/// プレビューを見ながら編集できるようにする（保存すればプレビューも描き直す）。
 final class PathEdit: EditCommand {
   override func open(_ c: CommandContext, _ target: Mark) async throws {
     let pane = c.pane as! PathPane
+    if let local = pane as? LocalPane, c.workspace.previewsMarkdown(local, target.entry) {
+      await local.editFile(local.pathOfMark(target), frame: .pane(left: local === c.workspace.left))
+      return
+    }
     await pane.editFile(pane.pathOfMark(target))
   }
 }

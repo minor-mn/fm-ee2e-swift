@@ -2,7 +2,7 @@ import Foundation
 
 /// [executable] を、左右の窓の場所を覆う枠の中の端末で動かし、終わったら終了コードを返す。画面は切り替えない。
 /// 終了コードで [waitAfterExit] が true なら、終わったあと出力を残して Enter を待つ（エディタなどは待たずに閉じる）。
-/// 失敗したときは右下に終了コードを出す。
+/// 失敗したときは右下に終了コードを出す。[frame] が [ModalFrame.pane] なら、片側の窓の場所だけを覆う。
 @discardableResult
 func runInTerminal(
   _ app: App,
@@ -10,6 +10,7 @@ func runInTerminal(
   _ executable: String,
   _ args: [String],
   workingDirectory: String? = nil,
+  frame: ModalFrame = .panel,
   waitAfterExit: @escaping (_ exitCode: Int) -> Bool = { _ in true }
 ) async -> Int {
   final class Failure {
@@ -17,7 +18,7 @@ func runInTerminal(
   }
   let failure = Failure()
   let code = await app.showModal { (close: @escaping (Int) -> Void) -> View in
-    let modal = TerminalModal(app, title, close, waitAfterExit: waitAfterExit)
+    let modal = TerminalModal(app, title, close, frame: frame, waitAfterExit: waitAfterExit)
     // 枠を出してから始める。
     Task {
       do {
@@ -39,18 +40,34 @@ func runInTerminal(
 /// プログラムを動かす枠。動いている間はキーをすべてプログラムに渡し、Ctrl+C もプログラムに届ける。
 /// 終わったあとは ↑↓ PgUp PgDn で、画面から流れた出力をさかのぼれる。
 final class TerminalModal: Modal, SelectionSource {
-  init(_ app: App, _ title: String, _ close: @escaping (_ exitCode: Int) -> Void, waitAfterExit: @escaping (_ exitCode: Int) -> Bool) {
+  init(
+    _ app: App,
+    _ title: String,
+    _ close: @escaping (_ exitCode: Int) -> Void,
+    frame: ModalFrame = .panel,
+    waitAfterExit: @escaping (_ exitCode: Int) -> Bool
+  ) {
     self.app = app
     self.close = close
     self.waitAfterExit = waitAfterExit
+    modalFrame = frame
     // 枠の中の大きさ（[drawBody] で描く大きさ）で始める。
-    let (columns, rows) = app.gridSize(app.host.width - 4, app.host.height - 6, theme: app.activeTheme)
+    let (width, height) =
+      if case let .pane(left) = frame {
+        (paneColumns(app.host.width, left: left).width - 4, app.host.height - 11)
+      } else {
+        (app.host.width - 4, app.host.height - 6)
+      }
+    let (columns, rows) = app.gridSize(width, height, theme: app.activeTheme)
     terminal = ShellTerminal(max(2, columns), max(1, rows))
     super.init(title, accent: Palette.cyan)
   }
 
   let app: App
   let close: (_ exitCode: Int) -> Void
+
+  /// 覆う場所（[frame]）。
+  private let modalFrame: ModalFrame
 
   /// 終わったあと Enter を待つか（終了コードで決める）。
   let waitAfterExit: (_ exitCode: Int) -> Bool
@@ -67,7 +84,7 @@ final class TerminalModal: Modal, SelectionSource {
   /// プログラムが動いている。
   var running: Bool { exitCode == nil }
 
-  override var frame: ModalFrame { .panel }
+  override var frame: ModalFrame { modalFrame }
 
   /// 失敗したときだけ、右下に終了コードを出す。
   override var status: (String, Rgb)? {

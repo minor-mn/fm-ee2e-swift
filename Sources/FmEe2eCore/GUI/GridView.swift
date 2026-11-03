@@ -56,12 +56,44 @@ final class GridView: NSView, NSTextInputClient {
     var lineCount: Int { screen?.height ?? 0 }
     var firstVisibleLine: Int { 0 }
 
+    /// 重ねた画面（枠の中の端末・プレビューの本文など）の文字も、見えているとおりに写す。
+    /// 重ねた画面の1つのセルがこの画面の何桁かに広がるときは、2桁目からを空文字にする（同じ文字を何度も写さない）。
     func lineCells(_ line: Int) -> (cells: [String], continues: Bool) {
-      guard let screen, line >= 0, line < screen.height else { return ([], false) }
-      return ((0..<screen.width).map { screen.cell($0, line)?.text ?? " " }, false)
+      guard let screen, let view, line >= 0, line < screen.height else { return ([], false) }
+      var cells: [String] = []
+      var previous: (Screen, Int, Int)?
+      for x in 0..<screen.width {
+        guard let (text, shown, cx, cy) = view.visibleCell(screen, x, line) else {
+          cells.append(" ")
+          previous = nil
+          continue
+        }
+        if let (s, px, py) = previous, s === shown && px == cx && py == cy {
+          cells.append("")
+        } else {
+          cells.append(text)
+        }
+        previous = (shown, cx, cy)
+      }
+      return (cells, false)
     }
 
     func scrollLines(_ delta: Int) {}
+  }
+
+  /// [screen] の [x]・[y] のセルに見えている文字と、それを持つ画面とその中の位置。後に重ねた画面ほど上で、透明なセルは下が見える。
+  /// 重ねた画面は文字の大きさが違うことがあるので、セルの位置は文字の幅と高さで換算する。何も描いていなければ nil。
+  fileprivate func visibleCell(_ screen: Screen, _ x: Int, _ y: Int) -> (String, Screen, Int, Int)? {
+    let outer = host.fonts(screen.theme)
+    for layer in screen.layers.reversed() where x >= layer.x && x < layer.x + layer.w && y >= layer.y && y < layer.y + layer.h {
+      let inner = host.fonts(layer.screen.theme)
+      let cx = Int((CGFloat(x - layer.x) * outer.cellWidth / inner.cellWidth).rounded(.down))
+      let cy = Int((CGFloat(y - layer.y) * outer.cellHeight / inner.cellHeight).rounded(.down))
+      if cx < layer.screen.width && cy < layer.screen.height, let found = visibleCell(layer.screen, cx, cy) {
+        return found
+      }
+    }
+    return screen.cell(x, y).map { ($0.text, screen, x, y) }
   }
 
   /// 重ね方の位置 [path]（重ねた画面の番号を上からたどったもの）の画面。
