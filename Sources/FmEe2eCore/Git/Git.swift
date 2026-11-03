@@ -307,6 +307,14 @@ final class Git {
     }
   }
 
+  /// [root] のリポジトリで、手元のタグ [names] を消す（git tag -d）。リモートのタグはそのまま。
+  func deleteTags(_ root: String, _ names: [String]) async throws {
+    let result = try await run(root, ["tag", "-d", "--"] + names)
+    if result.exitCode != 0 {
+      throw failure(["tag"], result)
+    }
+  }
+
   /// 手元のブランチの名前。
   func localBranches(_ root: String) async throws -> [String] { try await refs(root, "refs/heads/") }
 
@@ -347,6 +355,21 @@ final class Git {
     if result.exitCode != 0 {
       // まだコミットがないブランチ。
       return []
+    }
+    return parseGitLog(Git.decode(result.stdoutData))
+  }
+
+  /// [oldest] から [newest] までのコミット（新しい順）。[oldest] は含めない（git log oldest..newest）。
+  func rangeLog(_ root: String, _ oldest: String, _ newest: String) async throws -> [GitCommit] {
+    let result = try await run(root, [
+      "log",
+      "-z",
+      "--date=format:%Y-%m-%d %H:%M",
+      "--format=%H%x1f%h%x1f%ad%x1f%an%x1f%s",
+      "\(oldest)..\(newest)",
+    ])
+    if result.exitCode != 0 {
+      throw failure(["log"], result)
     }
     return parseGitLog(Git.decode(result.stdoutData))
   }

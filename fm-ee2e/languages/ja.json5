@@ -571,6 +571,16 @@
       name_required: "タグ名を入力してください。",
       invalid_name: "「{name}」はタグ名に使えません。",
     },
+    // git push tag
+    push_tag: {
+      name: "push するタグの名前",
+    },
+    // git push --delete tag
+    delete_remote_tag: {
+      name: "リモートから削除するタグの名前",
+      message: "リモート {remote} のタグ {name} を削除します。",
+      yes: "削除する",
+    },
   },
   log_view: {
     // コミットの一覧の操作の案内
@@ -579,7 +589,14 @@
       mark: "マーク",
       open: "開く",
       edit: "作者・メッセージを直す",
+      delete: "消す",
       back: "戻る",
+    },
+    // タグを消す（git tag -d）
+    delete_tags: {
+      // このあとに、消すタグを1行ずつ並べる
+      message: "ローカルの以下のタグを削除します。",
+      yes: "消す",
     },
     // 実行中の表示（{command} は git log など）
     running: "{command} 中…",
@@ -613,6 +630,7 @@
       file_commits: "このファイルのコミットはまだありません。",
       files: "変わったファイルはありません。",
       tags: "タグはまだありません。",
+      range_commits: "このタグの間にコミットはありません。",
     },
     no_diff: "差分はありません。",
   },

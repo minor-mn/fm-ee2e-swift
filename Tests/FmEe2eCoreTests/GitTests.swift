@@ -285,5 +285,13 @@ struct GitTests {
     ])
     #expect(tags.map(\.commit.date).last == "2026-01-01 00:00")
     #expect(tags.allSatisfy { $0.commit.hash.count == 40 && $0.commit.hash.hasPrefix($0.commit.shortHash) })
+
+    // タグの間のコミットは、古いほうのタグのコミットを含めない。
+    let range = try await g.rangeLog(repo, tags[2].commit.hash, tags[0].commit.hash)
+    #expect(range.map(\.subject) == ["second"])
+    #expect(try await g.rangeLog(repo, tags[1].commit.hash, tags[0].commit.hash).isEmpty)
+
+    try await g.deleteTags(repo, ["light", "v1.0.0"])
+    #expect(try await g.tags(repo).map(\.name) == ["v2.0.0"])
   }
 }
