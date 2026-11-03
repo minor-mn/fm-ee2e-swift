@@ -14,7 +14,10 @@ jobs:
     # Apple Silicon の macOS 27 と Xcode 27（Swift 6.4）。
     runs-on: xcode-27
     steps:
+      # make-app.sh が git describe でバージョンを決めるので、タグを含めて全部取る。
       - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
 
       - name: Build app
         run: sh scripts/make-app.sh

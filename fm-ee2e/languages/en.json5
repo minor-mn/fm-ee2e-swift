@@ -343,6 +343,9 @@
   format: {
     title: "Convert format",
     name: "Output file name",
+    // When converting several files ({names} is the output names joined by ", ")
+    exists: "Not converted; these already exist: {names}",
+    converting: "Converting {count} files…",
   },
   // Shell
   shell: {

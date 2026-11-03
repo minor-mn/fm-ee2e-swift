@@ -1,11 +1,20 @@
 // メイン画面の上下の帯。上は枠で囲んだ4行（タイトル入りの線、容量、所有者、下の線）、
 // 下はマーク・案内・ファンクションキーの行。
 
-/// FD のように上の帯を枠で囲み、上の線にタイトルを埋め込む。
+import Foundation
+
+/// アプリのバージョン（.app の Info.plist の CFBundleShortVersionString。make-app.sh が git のタグから入れる）。
+/// .app の外から動かしたとき（.build/debug/fm-ee2e など）は nil。
+private let appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+
+/// FD のように上の帯を枠で囲み、上の線にタイトルを埋め込む。バージョンがわかれば、タイトルの右に添える。
 func drawHeader(_ screen: Screen) {
   let bg = Style()
   screen.box(0, 0, screen.width, 4, bg.copyWith(fg: Palette.outline))
-  let titleEnd = 3 + screen.gradientText(3, 0, "fm-ee2e-swift", [Palette.purple, Palette.green], bg.copyWith(bold: true))
+  var titleEnd = 3 + screen.gradientText(3, 0, "fm-ee2e-swift", [Palette.purple, Palette.green], bg.copyWith(bold: true))
+  if let appVersion {
+    titleEnd += screen.text(titleEnd, 0, " v\(appVersion)", bg.copyWith(fg: Rgb(0x666666)))
+  }
   screen.text(2, 0, " ", bg)
   screen.text(titleEnd, 0, " ", bg)
 }
