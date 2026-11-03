@@ -78,7 +78,7 @@ let functionKeys: [(String, String)?] = [
   ("Mkdir", "K"),
   ("Rename", "R"),
   ("Edit", "E"),
-  nil,
+  ("Format", "F"),
   nil,
   nil,
 ]

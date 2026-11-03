@@ -339,6 +339,11 @@
   rename: {
     title: "Rename",
   },
+  // Format conversion
+  format: {
+    title: "Convert format",
+    name: "Output file name",
+  },
   // Shell
   shell: {
     title: "Shell",

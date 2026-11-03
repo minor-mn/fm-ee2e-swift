@@ -18,6 +18,7 @@ class LocalPane: PathPane {
       .toggleHidden: ToggleHiddenCommand(),
       .goToPath: LocalGoToPath(),
       .shell: LocalShell(),
+      .format: LocalFormat(),
       .transfer: RightTransfer(),
     ]
   }
