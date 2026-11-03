@@ -565,6 +565,22 @@
     rename: {
       new_name: "New branch name",
     },
+    // git tag
+    tag: {
+      new_name: "Tag name for the current commit (HEAD)",
+      name_required: "Enter a tag name.",
+      invalid_name: "\"{name}\" is not a valid tag name.",
+    },
+    // git push tag
+    push_tag: {
+      name: "Tag name to push",
+    },
+    // git push --delete tag
+    delete_remote_tag: {
+      name: "Tag name to delete from the remote",
+      message: "Tag {name} will be deleted from remote {remote}.",
+      yes: "Delete",
+    },
   },
   log_view: {
     // Key hints for the commit list
@@ -573,7 +589,14 @@
       mark: "Mark",
       open: "Open",
       edit: "Edit author/message",
+      delete: "Delete",
       back: "Back",
+    },
+    // Deleting tags (git tag -d)
+    delete_tags: {
+      // The tags to delete follow, one per line
+      message: "The following local tags will be deleted.",
+      yes: "Delete",
     },
     // Progress text ({command} is git log, etc.)
     running: "Running {command}…",
@@ -600,11 +623,14 @@
     },
     // List heading ({title} is git log  branch name, etc.)
     heading_count: "{title}  {count} commits",
+    heading_tags: "{title}  {count} tags",
     // When the list is empty
     empty: {
       commits: "No commits yet.",
       file_commits: "No commits for this file yet.",
       files: "No files changed.",
+      tags: "No tags yet.",
+      range_commits: "No commits between these tags.",
     },
     no_diff: "No differences.",
   },

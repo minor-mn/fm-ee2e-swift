@@ -27,6 +27,9 @@ class LogListView: Modal {
 
   func drawRow(_ screen: Screen, _ y: Int, _ w: Int, _ index: Int, _ style: Style) {}
 
+  /// Enter で開けるか。
+  var openable: Bool { true }
+
   /// カーソルの項目（マークが1つだけならその項目）で Enter を押したとき。
   func open(_ index: Int) async throws {}
 
@@ -45,6 +48,12 @@ class LogListView: Modal {
   /// カーソルの項目で E を押したとき（[editable] のときだけ）。
   func edit(_ index: Int) async throws {}
 
+  /// D で消せるか。
+  var deletable: Bool { false }
+
+  /// D を押したとき（[deletable] のときだけ）。[indices] は、マークした項目（なければカーソルの項目）の番号。
+  func delete(_ indices: [Int]) async throws {}
+
   /// 上の帯の見出し。一覧を読み直すと変わることがある。
   var heading: String { title }
 
@@ -57,8 +66,9 @@ class LogListView: Modal {
   override var hints: [(String, String)] {
     [("↑↓ PgUp PgDn", tr("log_view.hints.move"))]
       + (markable ? [("Space", tr("log_view.hints.mark"))] : [])
-      + [("Enter", tr("log_view.hints.open"))]
+      + (openable ? [("Enter", tr("log_view.hints.open"))] : [])
       + (editable ? [("E", tr("log_view.hints.edit"))] : [])
+      + (deletable ? [("D", tr("log_view.hints.delete"))] : [])
       + [("Esc / q", tr("log_view.hints.back"))]
   }
 
@@ -115,7 +125,7 @@ class LogListView: Modal {
     case "escape":
       close(())
     case "enter":
-      if length > 0 {
+      if openable && length > 0 {
         let marked = marks.sorted()
         let index = marked.count == 1 ? marked[0] : cursor
         start { [unowned self] in
@@ -138,6 +148,9 @@ class LogListView: Modal {
       } else if key.char!.lowercased() == "e" && editable && length > 0 {
         let index = cursor
         start { [unowned self] in try await edit(index) }
+      } else if key.char!.lowercased() == "d" && deletable && length > 0 {
+        let indices = marks.isEmpty ? [cursor] : marks.sorted()
+        start { [unowned self] in try await delete(indices) }
       }
     default:
       break
@@ -290,6 +303,122 @@ final class LogView: LogListView {
         commit.shortHash
       )
     }
+  }
+}
+
+/// タグの一覧（作った日の新しい順）と、それが指すコミット。Enter で、そのコミットで変わったファイルの一覧を出す。
+final class TagView: LogListView {
+  init(_ app: App, _ close: @escaping (()) -> Void, _ git: Git, _ root: String, _ tags: [GitTag]) {
+    self.git = git
+    self.root = root
+    self.tags = tags
+    super.init(app, close, "git tag")
+  }
+
+  let git: Git
+  let root: String
+  var tags: [GitTag]
+
+  /// タグ名の列の幅。長すぎるものは切る。
+  private var nameWidth: Int { min(24, tags.map { textWidth($0.name) }.max() ?? 0) }
+
+  override var heading: String { tr("log_view.heading_tags", ["title": title, "count": tags.count]) }
+
+  override var length: Int { tags.count }
+
+  override var markable: Bool { true }
+
+  override var deletable: Bool { true }
+
+  /// 確かめてから、手元のタグを消す（git tag -d）。消したら一覧を読み直す。
+  override func delete(_ indices: [Int]) async throws {
+    let names = indices.map { tags[$0].name }
+    // 消すタグを、一覧の順に1行ずつ並べる。
+    if !(await app.confirm(
+      "git tag -d",
+      ([tr("log_view.delete_tags.message")] + names).joined(separator: "\n"),
+      yes: tr("log_view.delete_tags.yes")
+    )) {
+      return
+    }
+    let (git, root) = (git, root)
+    tags = try await app.withProgress(tr("log_view.running", ["command": "git tag -d"])) {
+      try await git.deleteTags(root, names)
+      return try await git.tags(root)
+    }
+    marks.removeAll()
+  }
+
+  /// 一覧は新しい順なので、[first] が一番新しく、[last] が一番古い。その間のコミット（古いほうのタグのコミットは含めない）を出す。
+  override func openRange(_ first: Int, _ last: Int) async throws {
+    let (app, git, root) = (app, git, root)
+    let newest = tags[first]
+    let oldest = tags[last]
+    let commits = try await app.withProgress(tr("log_view.running", ["command": "git log"])) {
+      try await git.rangeLog(root, oldest.commit.hash, newest.commit.hash)
+    }
+    await app.showModal { (close: @escaping (()) -> Void) in
+      RangeLogView(app, close, "\(oldest.name)..\(newest.name)", commits)
+    }
+  }
+
+  override var empty: String { tr("log_view.empty.tags") }
+
+  override func drawRow(_ screen: Screen, _ y: Int, _ w: Int, _ index: Int, _ style: Style) {
+    let tag = tags[index]
+    let c = tag.commit
+    // 先頭の2文字は、ほかの一覧のマーク（*）と空白に揃える。
+    var x = 2
+    x += screen.text(x, y, padRight(truncate(tag.name, nameWidth), nameWidth), style.copyWith(fg: Palette.lime, bold: true)) + 2
+    x += screen.text(x, y, c.shortHash, style.copyWith(fg: Palette.orange)) + 2
+    x += screen.text(x, y, c.date, style.copyWith(fg: Palette.muted)) + 2
+    x += screen.text(x, y, truncate(c.author, 14), style.copyWith(fg: Palette.cyan)) + 2
+    screen.text(x, y, truncate(c.subject, max(0, w - x - 1)), style)
+  }
+
+  override func open(_ index: Int) async throws {
+    let (app, git, root) = (app, git, root)
+    let tag = tags[index]
+    let commit = tag.commit
+    let files = try await app.withProgress(tr("log_view.running", ["command": "git show"])) { try await git.commitFiles(root, commit.hash) }
+    await app.showModal { (close: @escaping (()) -> Void) in
+      CommitFilesView(
+        app,
+        close,
+        "\(tag.name)  \(commit.shortHash)  \(commit.subject)",
+        files,
+        { try await git.commitDiff(root, commit.hash) },
+        commit.shortHash
+      )
+    }
+  }
+}
+
+/// 2つのタグの間のコミットの一覧（リリースノート）。見るだけで、マークも Enter もない。
+final class RangeLogView: LogListView {
+  init(_ app: App, _ close: @escaping (()) -> Void, _ title: String, _ commits: [GitCommit]) {
+    self.commits = commits
+    super.init(app, close, title)
+  }
+
+  let commits: [GitCommit]
+
+  override var heading: String { tr("log_view.heading_count", ["title": title, "count": commits.count]) }
+
+  override var length: Int { commits.count }
+
+  override var openable: Bool { false }
+
+  override var empty: String { tr("log_view.empty.range_commits") }
+
+  override func drawRow(_ screen: Screen, _ y: Int, _ w: Int, _ index: Int, _ style: Style) {
+    let c = commits[index]
+    // 先頭の2文字は、ほかの一覧のマーク（*）と空白に揃える。
+    var x = 2
+    x += screen.text(x, y, c.shortHash, style.copyWith(fg: Palette.orange)) + 2
+    x += screen.text(x, y, c.date, style.copyWith(fg: Palette.muted)) + 2
+    x += screen.text(x, y, truncate(c.author, 14), style.copyWith(fg: Palette.cyan)) + 2
+    screen.text(x, y, truncate(c.subject, max(0, w - x - 1)), style)
   }
 }
 

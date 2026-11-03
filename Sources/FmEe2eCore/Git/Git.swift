@@ -294,6 +294,27 @@ final class Git {
     }
   }
 
+  /// [name] がタグ名として使えるか（git check-ref-format refs/tags/<名前>）。
+  func isValidTagName(_ root: String, _ name: String) async throws -> Bool {
+    try await run(root, ["check-ref-format", "refs/tags/\(name)"]).exitCode == 0
+  }
+
+  /// [root] のリポジトリで、今の場所（HEAD）に注釈付きタグ [name] を作る。メッセージはタグ名と同じ。
+  func createTag(_ root: String, _ name: String) async throws {
+    let result = try await run(root, ["tag", "-a", "-m", name, "--", name])
+    if result.exitCode != 0 {
+      throw failure(["tag"], result)
+    }
+  }
+
+  /// [root] のリポジトリで、手元のタグ [names] を消す（git tag -d）。リモートのタグはそのまま。
+  func deleteTags(_ root: String, _ names: [String]) async throws {
+    let result = try await run(root, ["tag", "-d", "--"] + names)
+    if result.exitCode != 0 {
+      throw failure(["tag"], result)
+    }
+  }
+
   /// 手元のブランチの名前。
   func localBranches(_ root: String) async throws -> [String] { try await refs(root, "refs/heads/") }
 
@@ -336,6 +357,40 @@ final class Git {
       return []
     }
     return parseGitLog(Git.decode(result.stdoutData))
+  }
+
+  /// [oldest] から [newest] までのコミット（新しい順）。[oldest] は含めない（git log oldest..newest）。
+  func rangeLog(_ root: String, _ oldest: String, _ newest: String) async throws -> [GitCommit] {
+    let result = try await run(root, [
+      "log",
+      "-z",
+      "--date=format:%Y-%m-%d %H:%M",
+      "--format=%H%x1f%h%x1f%ad%x1f%an%x1f%s",
+      "\(oldest)..\(newest)",
+    ])
+    if result.exitCode != 0 {
+      throw failure(["log"], result)
+    }
+    return parseGitLog(Git.decode(result.stdoutData))
+  }
+
+  /// タグと、それが指すコミット（作った日の新しい順）。注釈付きタグは、タグの先のコミットを読む。
+  func tags(_ root: String) async throws -> [GitTag] {
+    // 注釈付きタグは %(*…) がタグの先のコミット、軽量タグは %(…) がそのままコミット。
+    func fields(_ prefix: String) -> String {
+      ["objectname", "objectname:short", "authordate:format:%Y-%m-%d %H:%M", "authorname", "subject"]
+        .map { "%(\(prefix)\($0))" }.joined(separator: "%1f")
+    }
+    let result = try await run(root, [
+      "for-each-ref",
+      "--sort=-creatordate",
+      "--format=%(refname:short)%1f%(if)%(*objectname)%(then)\(fields("*"))%(else)\(fields(""))%(end)%00",
+      "refs/tags/",
+    ])
+    if result.exitCode != 0 {
+      throw failure(["for-each-ref"], result)
+    }
+    return parseGitTags(Git.decode(result.stdoutData))
   }
 
   /// [path]（[dir] からの相対パス）が変わったコミット（新しい順に [limit] 件まで）。名前の変更もたどる。
@@ -1101,6 +1156,21 @@ struct GitCommit {
 
   /// メッセージの1行目。
   let subject: String
+}
+
+/// タグと、それが指すコミット。
+struct GitTag {
+  let name: String
+  let commit: GitCommit
+}
+
+/// `git for-each-ref` の「タグ名・ハッシュ・短いハッシュ・日時・作者・1行目」を \x1f で区切り、\0 で終えた出力を読む。
+func parseGitTags(_ output: String) -> [GitTag] {
+  splitOn(output, "\0").compactMap { record in
+    let fields = splitOn(trim(record), "\u{1f}")
+    guard fields.count == 6 else { return nil }
+    return GitTag(name: fields[0], commit: GitCommit(fields[1], fields[2], fields[3], fields[4], fields[5]))
+  }
 }
 
 /// `git log -z --format=%H%x1f%h%x1f%ad%x1f%an%x1f%s` の出力を読む。
