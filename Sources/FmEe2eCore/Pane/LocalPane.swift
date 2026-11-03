@@ -240,7 +240,10 @@ class LocalPane: PathPane {
     return try await make(path)
   }
 
-  override func open(_ entry: Entry) async {
+  override func open(_ entry: Entry) async { await open(entry, editFrame: .panel) }
+
+  /// [entry] を開く。エディタで開くときは、[editFrame] の場所を覆う。
+  func open(_ entry: Entry, editFrame: ModalFrame) async {
     do {
       if inArchive {
         let item = entry.data as! ArchiveItem
@@ -256,7 +259,7 @@ class LocalPane: PathPane {
       } else if entry.executable {
         await exec(entry)
       } else if await shouldEditInTerminal(pathOf(entry)) {
-        await editFile(pathOf(entry))
+        await editFile(pathOf(entry), frame: editFrame)
       } else {
         try await openFile(pathOf(entry))
       }
@@ -276,8 +279,11 @@ class LocalPane: PathPane {
   }
 
   /// 枠の中でエディタ（$EDITOR、なければ vim）を開き、閉じたら読み直す。
-  override func editFile(_ path: String) async {
-    await editInTerminal(app, path, workingDirectory: dir)
+  override func editFile(_ path: String) async { await editFile(path, frame: .panel) }
+
+  /// [path] をエディタで開く。[frame] は、エディタの枠で覆う場所。
+  func editFile(_ path: String, frame: ModalFrame) async {
+    await editInTerminal(app, path, workingDirectory: dir, frame: frame)
     await load()
   }
 
@@ -317,12 +323,13 @@ class LocalPane: PathPane {
 }
 
 /// 枠の中でエディタ（$EDITOR、なければ vim）を開き、閉じたら戻る。
-func editInTerminal(_ app: App, _ path: String, workingDirectory: String) async {
+func editInTerminal(_ app: App, _ path: String, workingDirectory: String, frame: ModalFrame = .panel) async {
   let editor = ProcessInfo.processInfo.environment["EDITOR"]
   await runInTerminal(
     app, path, "/bin/sh",
     ["-c", "\(editor == nil || editor!.isEmpty ? "vim" : editor!) \"$0\"", path],
     workingDirectory: workingDirectory,
+    frame: frame,
     waitAfterExit: { _ in false }
   )
 }

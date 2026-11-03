@@ -5,6 +5,9 @@ import QuickLookThumbnailing
 nonisolated enum PreviewKind: Sendable {
   case image
   case video
+
+  /// Markdown（ローカルだけ）。画像にせず、文字として描く。
+  case markdown
 }
 
 private nonisolated let imageExtensions: Set<String> = [
@@ -22,6 +25,12 @@ nonisolated func previewKindOf(_ name: String) -> PreviewKind? {
     return .video
   }
   return nil
+}
+
+/// Markdown のファイルの名前か（.md・.markdown）。[previewKindOf] は画像・動画だけなので、別に見る。
+nonisolated func isMarkdownName(_ name: String) -> Bool {
+  let ext = p.extension(name).lowercased()
+  return ext == ".md" || ext == ".markdown"
 }
 
 /// プレビューの長い辺の上限（ピクセル）。大きな写真を覚えておかないよう、これより大きければ縮める。
@@ -43,6 +52,9 @@ func makePreview(_ path: String, _ kind: PreviewKind) async -> NSImage? {
       return nil
     }
     return thumbnail.nsImage
+  case .markdown:
+    // Markdown は画像にせず、[PreviewOverlay] が文字として描く。
+    return nil
   }
 }
 

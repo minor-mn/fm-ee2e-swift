@@ -1,5 +1,41 @@
 import AppKit
 
+/// Markdown のプレビューの本文。[top] 行目から [rows] 行を出す。GUI 版では、ホイールで [top] を動かし、マウスで選んでコピーできる。
+final class MarkdownScroll: SelectionSource {
+  init(_ app: App) {
+    self.app = app
+  }
+
+  let app: App
+  var lines: [MarkdownLine] = []
+  var top = 0
+  var rows = 0
+
+  var lineCount: Int { lines.count }
+
+  var firstVisibleLine: Int { top }
+
+  /// 全角の文字は、右半分のセルを空文字にする。
+  func lineCells(_ line: Int) -> (cells: [String], continues: Bool) {
+    guard line >= 0 && line < lines.count else { return ([], false) }
+    var cells: [String] = []
+    for span in lines[line] {
+      for character in span.text {
+        cells.append(String(character))
+        if textWidth(String(character)) > 1 {
+          cells.append("")
+        }
+      }
+    }
+    return (cells, false)
+  }
+
+  func scrollLines(_ delta: Int) {
+    top = min(max(top + delta, 0), max(0, lines.count - rows))
+    app.requestRender()
+  }
+}
+
 /// ローカルの窓のカーソルの画像・動画（SSH の窓では画像だけ）を、反対側の窓の上に重ねて出す。
 final class PreviewOverlay {
   init(_ app: App) {
@@ -20,11 +56,18 @@ final class PreviewOverlay {
 
   /// プレビューがオンで、窓 [pane] のカーソルがプレビューできるファイルに乗っていれば、その項目と種類。
   /// SSH の窓では、画像だけ（動画は大きく、ファイルをまるごと読まないと1コマも出せないため）。
+  /// Markdown は、ローカルの窓の、圧縮ファイルの中でないものだけ。
   func target(_ pane: Pane) -> (Entry, PreviewKind)? {
     if !on || !pane.ready {
       return nil
     }
-    guard let entry = pane.current, !entry.isDir, let kind = previewKindOf(entry.name) else {
+    guard let entry = pane.current, !entry.isDir else {
+      return nil
+    }
+    if isMarkdownName(entry.name) {
+      return (pane as? LocalPane).map { !$0.inArchive } == true ? (entry, .markdown) : nil
+    }
+    guard let kind = previewKindOf(entry.name) else {
       return nil
     }
     if let ssh = pane as? SshPane {
@@ -35,6 +78,10 @@ final class PreviewOverlay {
 
   /// [pane] の [entry] のプレビューの窓を描く。画像はカーソルが少し止まってから作る。
   func draw(_ screen: Screen, _ pane: Pane, _ entry: Entry, _ kind: PreviewKind, _ x: Int, _ y: Int, _ w: Int, _ h: Int) {
+    if kind == .markdown, let local = pane as? LocalPane {
+      drawMarkdown(screen, p.absolute(local.pathOf(entry)), entry.name, x, y, w, h)
+      return
+    }
     let bg = Style()
     let id = previewId(pane, entry)
     if id != self.id {
@@ -53,6 +100,51 @@ final class PreviewOverlay {
       screen.image = ScreenImage(x + 1, y + 2, w - 2, h - 3, image)
     } else {
       screen.text(x + 2, y + 2, previews.containsKey(id) ? tr("preview_overlay.unavailable") : tr("preview_overlay.loading"), bg.copyWith(fg: Palette.muted))
+    }
+  }
+
+  /// 読んだ Markdown。[stamp]（更新日時と大きさ）か幅が変われば読み直す。読めなければ [lines] は nil。
+  private var markdown: (path: String, stamp: String, width: Int, lines: [MarkdownLine]?)?
+
+  /// Markdown の本文のスクロールと、GUI 版のマウスでの選択。別のファイルにしたら先頭に戻す（保存し直しでは戻さない）。
+  private lazy var markdownView = MarkdownScroll(app)
+
+  /// Markdown のファイル [path] を、整えて描く。描くたびに更新日時を見るので、エディタで保存すれば描き直す。
+  private func drawMarkdown(_ screen: Screen, _ path: String, _ name: String, _ x: Int, _ y: Int, _ w: Int, _ h: Int) {
+    let bg = Style()
+    // 枠の内側に1桁ずつ空ける。
+    let width = max(1, w - 4)
+    let attributes = try? FileManager.default.attributesOfItem(atPath: path)
+    let stamp = "\((attributes?[.modificationDate] as? Date)?.timeIntervalSince1970 ?? 0)|\((attributes?[.size] as? Int) ?? -1)"
+    if markdown == nil || markdown!.path != path || markdown!.stamp != stamp || markdown!.width != width {
+      if markdown?.path != path {
+        markdownView.top = 0
+      }
+      // 大きすぎるファイルは読まない。
+      let size = (attributes?[.size] as? Int) ?? 0
+      let data = size <= 4 * 1024 * 1024 ? FileManager.default.contents(atPath: path) : nil
+      markdown = (path, stamp, width, data.map { renderMarkdown(String(decoding: $0, as: UTF8.self), width: width) })
+    }
+    screen.fill(x, y, w, h, bg)
+    screen.box(x, y, w, h, bg.copyWith(fg: Palette.outline), title: "Preview", titleStyle: bg.copyWith(fg: Palette.lime))
+    screen.text(x + 1, y + 1, truncate(name, w - 2), bg.copyWith(fg: Palette.muted))
+    guard let lines = markdown?.lines else {
+      screen.text(x + 2, y + 2, tr("preview_overlay.unavailable"), bg.copyWith(fg: Palette.muted))
+      return
+    }
+    let view = markdownView
+    view.lines = lines
+    view.rows = max(0, h - 3)
+    view.top = min(max(view.top, 0), max(0, lines.count - view.rows))
+    // 本文は重ねた画面に描き、GUI 版ではホイールでスクロールでき、マウスで選んでコピーできるようにする（見えていない行も含む）。
+    screen.layer(x + 2, y + 2, width, view.rows, theme: screen.theme, selection: view) { s in
+      s.fill(0, 0, s.width, s.height, bg)
+      for (row, line) in lines.dropFirst(view.top).prefix(s.height).enumerated() {
+        var col = 0
+        for span in line where col < s.width {
+          col += s.text(col, row, span.text, markdownStyle(span, bg), maxWidth: s.width - col)
+        }
+      }
     }
   }
 

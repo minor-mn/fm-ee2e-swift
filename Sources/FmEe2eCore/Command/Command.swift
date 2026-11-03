@@ -174,6 +174,9 @@ protocol Workspace: AnyObject {
 
   /// 左右の一覧を読み直す。
   func reloadAll() async
+
+  /// [pane] の [entry] の Markdown を、反対側の窓にプレビュー（V）しているか。
+  func previewsMarkdown(_ pane: Pane, _ entry: Entry) -> Bool
 }
 
 /// C（複製）・M（移動）で選んだ項目。P で開いているフォルダーに貼り付ける。

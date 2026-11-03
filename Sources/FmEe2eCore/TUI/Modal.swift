@@ -6,8 +6,16 @@ enum ModalFrame {
   /// 左右の窓の場所（上下の帯の間）を覆う、枠で囲んだ窓。
   case panel
 
+  /// 左か右の窓の場所だけを覆う、枠で囲んだ窓（反対側の窓は見えたまま）。
+  case pane(left: Bool)
+
   /// 画面全体。上の帯に見出し、下の帯に案内。
   case page
+}
+
+/// 幅 [width] の画面の、左か右の窓の左端と幅（メイン画面と同じく、左は幅の半分）。
+func paneColumns(_ width: Int, left: Bool) -> (x: Int, width: Int) {
+  left ? (0, width / 2) : (width / 2, width - width / 2)
 }
 
 /// ダイアログや全画面の表示など、画面の上に重ねるものの共通部分。
@@ -36,7 +44,7 @@ class Modal: View {
   var background: Style {
     switch frame {
     case .dialog: Style(bg: Palette.surfaceHigh)
-    case .panel: Style(bg: Palette.surface)
+    case .panel, .pane: Style(bg: Palette.surface)
     case .page: Style()
     }
   }
@@ -89,6 +97,10 @@ class Modal: View {
     case .panel:
       // 上の帯の下から、下の帯（マーク・案内・ファンクションキー）の上まで。
       drawBox(screen, 0, 1, screen.width, max(8, screen.height - 3), hints.isEmpty ? 2 : 3)
+    case let .pane(left):
+      // メイン画面の窓と同じ場所（上の4行の下から、下の4行の上まで。左は幅の半分）。
+      let (x, w) = paneColumns(screen.width, left: left)
+      drawBox(screen, x, 4, w, max(8, screen.height - 8), hints.isEmpty ? 2 : 3)
     case .page:
       let w = screen.width
       let h = screen.height

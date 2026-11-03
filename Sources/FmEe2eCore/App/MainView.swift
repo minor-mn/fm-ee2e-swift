@@ -194,7 +194,7 @@ final class MainView: View, Workspace {
       drawUsage(s, 1, active)
       drawOwnership(s, 2, active)
     }
-    let leftWidth = w / 2
+    let leftWidth = paneColumns(w, left: true).width
     // 下から、ファンクションキー、空白、案内、マークの4行。
     let paneHeight = h - 8
     app.activeTheme = active.themeKey
@@ -542,6 +542,13 @@ final class MainView: View, Workspace {
     async let leftLoaded: Void = left.load()
     async let driveLoaded: Void = drive.load()
     _ = await (leftLoaded, driveLoaded)
+  }
+
+  func previewsMarkdown(_ pane: Pane, _ entry: Entry) -> Bool {
+    guard let (source, shown, kind) = previewTarget() else {
+      return false
+    }
+    return source === pane && kind == .markdown && shown.name == entry.name
   }
 
   private func help() async {
