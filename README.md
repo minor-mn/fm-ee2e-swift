@@ -1,6 +1,6 @@
 # fm-ee2e-swift
 
-![fm-ee2e-swift の画面](screenshot.webp)
+![fm-ee2e-swift の画面](readme-screenshot.webp)
 
 Mac のファイルを、キーボードだけでサクサク整理するアプリです。
 
@@ -153,6 +153,22 @@ open -e ~/.config/fm-ee2e/config.json5
 - タブのブロックに書いていないものは、`default` の値、`default` にもなければ `window` の値が使われます。
 - 背景の画像は、`~/.config/fm-ee2e/images` に画像を置いて、そのパスを `path` に書きます。
 - Google Drive と iCloud Drive のタブの上の帯には、開いているフォルダーの中身の合計の大きさ（Used）が出ます。フォルダーを開くたびに中を全部数えるので、ファイルがとても多くて動きが重いと感じたら、`google_drive` や `icloud` のブロックに `show_used: false` を書くと、数えるのをやめて軽くなります。
+
+---
+
+## 画像のフォーマットを変換する
+
+Mac に `cwebp`・`dwebp`・`gif2webp`・`ffmpeg` が入っていれば、ローカルのタブで、対応する画像ファイルの上で `F` を押すと、フォーマットを変換できます。入っていなくても、ほかの機能はそのまま使えます（必須ではありません）。
+
+| 変換元 | 変換先 | 使うコマンド |
+|---|---|---|
+| PNG・JPEG・TIFF | WebP | `cwebp` |
+| GIF | WebP | `gif2webp` |
+| WebP | PNG | `dwebp` |
+| WebP | JPEG | `ffmpeg` |
+
+- `cwebp`・`dwebp`・`gif2webp` は `brew install webp`、`ffmpeg` は `brew install ffmpeg` で入ります。入れたら、アプリを起動し直してください。
+- 同じフォーマットのファイルをいくつかマークして `F` を押すと、まとめて変換できます。
 
 ---
 
