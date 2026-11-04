@@ -23,6 +23,9 @@ final class GridView: NSView, NSTextInputClient {
   /// 窓の端と格子の間。
   private let padding: CGFloat = 6
 
+  /// 設定の yen_to_backslash。¥キーで \ を、Option+¥ で ¥ を入力する。
+  var yenToBackslash = true
+
   /// 日本語入力の変換中の文字。
   private var markedText = ""
 
@@ -827,11 +830,26 @@ final class GridView: NSView, NSTextInputClient {
       interpretKeyEvents([event])
       return
     }
+    if yenToBackslash, let bytes = Self.swapYen(event) {
+      host.send(bytes)
+      return
+    }
     if let bytes = Self.encode(event) {
       host.send(bytes)
       return
     }
     interpretKeyEvents([event])
+  }
+
+  /// JIS キーボードの¥キー（keyCode 93）を、¥ なら \、Option+¥ なら ¥ にする（macOS の既定の逆）。
+  /// ほかの修飾キーつきや、ほかのキーは nil。
+  private static func swapYen(_ event: NSEvent) -> [UInt8]? {
+    guard event.keyCode == 93 else { return nil }
+    switch event.modifierFlags.intersection([.shift, .control, .option, .command]) {
+    case []: return Array("\\".utf8)
+    case .option: return Array("¥".utf8)
+    default: return nil
+    }
   }
 
   /// 文字以外のキーと Ctrl+キーを、端末と同じバイト列にする。文字のキーは nil（日本語入力を通す）。
