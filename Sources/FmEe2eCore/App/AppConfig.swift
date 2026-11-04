@@ -16,10 +16,16 @@ import AppKit
 ///
 /// ファイルや項目がなければ true。コメント（// と /* */）と末尾のカンマも書ける（JSON5）。
 struct AppConfig {
-  init(language: String = "ja", rightTabs: [RightMode] = RightMode.allCases, appearance: Appearance = .standard) {
+  init(
+    language: String = "ja",
+    rightTabs: [RightMode] = RightMode.allCases,
+    appearance: Appearance = .standard,
+    yenToBackslash: Bool = true
+  ) {
     self.language = language
     self.rightTabs = rightTabs
     self.appearance = appearance
+    self.yenToBackslash = yenToBackslash
   }
 
   /// 画面の言葉（~/.config/fm-ee2e/languages/<language>.json5 を読む。ファイルがあれば、どの名前でもよい）。
@@ -30,6 +36,9 @@ struct AppConfig {
 
   /// 見た目（appearance）。書き方は [parseAppearance]。
   let appearance: Appearance
+
+  /// ¥キーで \ を、Option+¥ で ¥ を入力する（GUI 版だけ）。書かなければ true。
+  let yenToBackslash: Bool
 
   static var file: String { p.join(homeDir, ".config", "fm-ee2e", "config.json5") }
 
@@ -65,7 +74,7 @@ struct AppConfig {
     guard let root = json as? [String: Any] else {
       throw ConfigFormatError(tr("app_config.root_not_object"))
     }
-    let rootKeys = ["language", "right_tabs", "appearance"]
+    let rootKeys = ["language", "right_tabs", "appearance", "yen_to_backslash"]
     for key in root.keys where !rootKeys.contains(key) {
       throw ConfigFormatError(tr("app_config.unknown_root_key", ["key": key, "names": list(rootKeys)]))
     }
@@ -78,10 +87,24 @@ struct AppConfig {
       language = name
     }
     let appearance = try parseAppearance(root["appearance"])
-    guard let tabs = root["right_tabs"], !(tabs is NSNull) else {
-      return AppConfig(language: language, appearance: appearance)
+    var yenToBackslash = true
+    if let value = root["yen_to_backslash"], !(value is NSNull) {
+      yenToBackslash = try bool(value, "yen_to_backslash")
     }
-    guard let entries = tabs as? [String: Any] else {
+    return AppConfig(
+      language: language,
+      rightTabs: try parseRightTabs(root["right_tabs"]),
+      appearance: appearance,
+      yenToBackslash: yenToBackslash
+    )
+  }
+
+  /// right_tabs を読む。false のタブを除いた、出すタブ。
+  private static func parseRightTabs(_ value: Any?) throws -> [RightMode] {
+    guard let value, !(value is NSNull) else {
+      return RightMode.allCases
+    }
+    guard let entries = value as? [String: Any] else {
       throw ConfigFormatError(tr("app_config.right_tabs_not_object"))
     }
     var off = Set<RightMode>()
@@ -96,7 +119,7 @@ struct AppConfig {
         off.insert(mode)
       }
     }
-    return AppConfig(language: language, rightTabs: RightMode.allCases.filter { !off.contains($0) }, appearance: appearance)
+    return RightMode.allCases.filter { !off.contains($0) }
   }
 
   /// appearance を読む。

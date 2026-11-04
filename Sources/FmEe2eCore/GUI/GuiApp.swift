@@ -70,6 +70,7 @@ private final class GuiAppDelegate: NSObject, NSApplicationDelegate, NSWindowDel
     self.host = host
     let window = makeWindow(host)
     self.window = window
+    host.view?.yenToBackslash = config.yenToBackslash
     var shown: MainView?
     await runMain(host, config, configError.isEmpty ? nil : configError) { main in
       shown = main
@@ -133,6 +134,7 @@ private final class GuiAppDelegate: NSObject, NSApplicationDelegate, NSWindowDel
         let config = try AppConfig.parse(data ?? Data())
         Appearance.current = config.appearance
         blurView?.isHidden = !config.appearance.blur
+        host.view?.yenToBackslash = config.yenToBackslash
         host.appearanceChanged()
         main.apply(config)
         showMissingFonts(main.app, config.appearance)

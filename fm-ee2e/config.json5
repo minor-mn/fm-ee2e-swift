@@ -3,6 +3,9 @@
   // 画面の言葉（languages/<language>.json5）。ja（日本語）・en（英語）。書かなければ ja。
   language: "en",
 
+  // ¥キーで \ を、Option+¥ で ¥ を入力する（macOS の既定の逆）。GUI 版だけ。書かなければ true。
+  yen_to_backslash: true,
+
   // 右の窓に出すタブ（Tab で切り替える）。false にしたタブは出さない。
   right_tabs: {
     google_drive: true,

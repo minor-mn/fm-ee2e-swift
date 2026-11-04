@@ -18,6 +18,13 @@ private func parse(_ text: String) throws -> AppConfig { try AppConfig.parse(Dat
 @Test func emptyConfigIsDefault() throws {
   #expect(try parse(" \n").rightTabs == RightMode.allCases)
   #expect(try parse("{}").rightTabs == RightMode.allCases)
+  #expect(try parse("{}").yenToBackslash)
+}
+
+@Test func yenToBackslashCanBeTurnedOff() throws {
+  #expect(try parse("{ yen_to_backslash: false }").yenToBackslash == false)
+  #expect(try parse("{ yen_to_backslash: true }").yenToBackslash)
+  #expect(throws: ConfigFormatError.self) { try parse("{ yen_to_backslash: 0 }") }
 }
 
 @Test func badConfigIsRejected() {

@@ -1,10 +1,10 @@
-# v から始まるタグ（v1.0.0 など）を push すると、.app を作って zip にし、そのタグの Release に添付する。
+# GitHub の Releases でタグを選んで Release を公開すると、そのタグが指すコミットから .app を作って zip にし、その Release に添付する。
+# タグを push しただけでは何もしない。
 name: release
 
 on:
-  push:
-    tags:
-      - "v*"
+  release:
+    types: [published]
 
 permissions:
   contents: write
@@ -14,6 +14,7 @@ jobs:
     # Apple Silicon の macOS 27 と Xcode 27（Swift 6.4）。
     runs-on: xcode-27
     steps:
+      # Release のタグが指すコミットを取り出す。
       # make-app.sh が git describe でバージョンを決めるので、タグを含めて全部取る。
       - uses: actions/checkout@v5
         with:
@@ -34,7 +35,9 @@ jobs:
           cp -R .build/fm-ee2e.app fm-ee2e scripts/install.sh fm-ee2e-swift/
           ditto -c -k --keepParent fm-ee2e-swift fm-ee2e-swift.zip
 
-      - name: Create release
+      # 公開した Release に添付する（同じ名前のファイルがあれば置き換える）。
+      - name: Upload to release
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" fm-ee2e-swift.zip --title "$GITHUB_REF_NAME" --generate-notes
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" fm-ee2e-swift.zip --clobber
