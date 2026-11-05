@@ -17,6 +17,9 @@ class Ssh {
   static let executable = "/usr/bin/ssh"
   static let scpExecutable = "/usr/bin/scp"
 
+  /// ファイル操作を実行するプログラム。Container は container exec に差し替える。
+  var executionPath: String { Ssh.executable }
+
   /// ~/.ssh/config の Host 名。
   let host: String
 
@@ -116,7 +119,7 @@ class Ssh {
     defer {
       try? file.close()
     }
-    let process = try RunningProcess(Ssh.executable, try wrap(options + ["--", host, "sh -c \(try shellWord("cat \(shQuote(path))"))"]))
+    let process = try RunningProcess(executionPath, try downloadArgs(path))
     var writeError: (any Error)?
     var err = Data()
     process.onStdout = { [weak process] data in
@@ -147,6 +150,10 @@ class Ssh {
       let message = String(decoding: err, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
       throw SshException(message.isEmpty ? tr("ssh.exit_code", ["code": code]) : message)
     }
+  }
+
+  func downloadArgs(_ path: String) throws -> [String] {
+    try wrap(options + ["--", host, "sh -c \(try shellWord("cat \(shQuote(path))"))"])
   }
 
   /// [run] の出力から、最後の改行を除いた文字列。

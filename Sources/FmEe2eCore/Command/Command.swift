@@ -1,5 +1,8 @@
 /// キーに割り当てる操作の種類。どのキーがどの操作かは全タブ共通で、操作の中身はタブ（[Pane.commands]）が決める。
 enum Operation: Hashable {
+  case create
+  /// コンテナのログ（Container タブの F12）。
+  case logs
   case enter
   case delete
   case chmod
@@ -128,11 +131,11 @@ func applyName(_ pane: Pane, _ name: String?, _ apply: (String) async throws -> 
   await pane.load(focus: name)
 }
 
-/// 右の窓に出すもの（Tab で切り替える）。
-enum RightMode: CaseIterable { case drive, git, ssh, icloud, local }
+/// 右の窓に出すもの（Tab で切り替える）。並びは既定の切り替え順（設定ファイルの right_tabs で変えられる）。
+enum RightMode: CaseIterable { case local, ssh, git, container, icloud, drive }
 
 /// 左の窓に出すもの（Shift+Tab で切り替える）。
-enum LeftMode { case local, ssh }
+enum LeftMode: CaseIterable { case local, ssh, container }
 
 /// コマンドから見える、メイン画面の今の状態（窓・選んでいる窓・クリップボードなど）。
 protocol Workspace: AnyObject {

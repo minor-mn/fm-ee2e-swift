@@ -6,13 +6,23 @@
   // ¥キーで \ を、Option+¥ で ¥ を入力する（macOS の既定の逆）。GUI 版だけ。書かなければ true。
   yen_to_backslash: true,
 
-  // 右の窓に出すタブ（Tab で切り替える）。false にしたタブは出さない。
+  // 右の窓に出すタブ。0 にしたタブは出さない。1 以上は小さい順に Tab で切り替える。
+  // true・false も書ける（true はこの並びの順）。
   right_tabs: {
-    google_drive: true,
-    git: true,
-    ssh: true,
-    icloud: true,
-    local: true,
+    local: 1,
+    ssh: 2,
+    git: 3,
+    container: 4,
+    icloud: 5,
+    google_drive: 6,
+  },
+
+  // 左の窓に出すタブ。0 にしたタブは出さない（どれか1つは 1 以上にする）。1 以上は小さい順に Shift+Tab で切り替える。
+  // 起動したときは、いちばん小さいタブを出す。true・false も書ける（true はこの並びの順）。
+  left_tabs: {
+    local: 1,
+    ssh: 2,
+    container: 3,
   },
 
   appearance: {
@@ -62,12 +72,12 @@
     // Tab: Local
     local: {
       background: {
-        color: "#222244",
+        color: "#111133",
         image: {
           path: "~/.config/fm-ee2e/images/local.webp",
           opacity: 0.4,
           mode: "center",
-          align: "bottom_left",
+          align: "bottom_right",
           max_width: 0.5,
           max_height: 0.5,
         },
@@ -168,16 +178,15 @@
     // Tab: SSH
     ssh: {
       background: {
-        color: "#112255",
+        color: "#001144",
         image: {
           path: "~/.config/fm-ee2e/images/ssh.webp",
-          // 不透明度（透過率 3割）
-          opacity: 0.7,
+          opacity: 0.4,
           // fill（覆う）・fit（全体が入る）・center（元の大きさ）・tile（並べる）
           mode: "center",
           align: "bottom_right",
-          max_width: 0.4,
-          max_height: 0.4,
+          max_width: 0.5,
+          max_height: 0.5,
         },
       },
 
@@ -200,7 +209,24 @@
         },
       },
     },
-
+    // Tab: Container
+    container: {
+      accent: { color: "#FF9F43" },
+      cursor: { background: { color: "#6B3A12" } },
+      background: {
+        color: "#2A1410",
+        image: {
+          path: "~/.config/fm-ee2e/images/container.webp",
+          // 不透明度（透過率 3割）
+          opacity: 0.4,
+          // fill（覆う）・fit（全体が入る）・center（元の大きさ）・tile（並べる）
+          mode: "center",
+          align: "bottom_right",
+          max_width: 0.4,
+          max_height: 0.4,
+        },
+      },
+    },
     // Tab: iCloud
     icloud: {
       show_used: true,
@@ -223,3 +249,4 @@
     },
   },
 }
+

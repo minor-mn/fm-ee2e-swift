@@ -103,7 +103,7 @@ class SshShell: ShellCommand {
   override func completion(_ c: CommandContext) -> CompletionSource { RemoteCompletion(ssh(c), target(c).dir) }
 
   override func commandLine(_ c: CommandContext, _ command: String) throws -> (String, [String], String?) {
-    (Ssh.executable, try ssh(c).commandArgs(target(c).dir, command), nil)
+    (ssh(c).executionPath, try ssh(c).commandArgs(target(c).dir, command), nil)
   }
 }
 

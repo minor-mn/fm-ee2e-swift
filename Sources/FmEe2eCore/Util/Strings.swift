@@ -48,13 +48,22 @@ enum Strings {
   /// 言葉 [language] の文言のファイルを読んで [table] にする。読めなければ、その理由を返す（[table] は変えない）。
   @discardableResult
   static func load(_ language: String) -> String? {
-    let file = file(language)
-    guard let data = FileManager.default.contents(atPath: file) else {
+    let bundled = Bundle.main.resourceURL?.appendingPathComponent("languages").appendingPathComponent("\(language).json5")
+    return loadFile(file(language), fallback: bundled.flatMap { FileManager.default.contents(atPath: $0.path) })
+  }
+
+  /// アプリ同梱の文言を既定値にし、利用者が設定した文言を優先する。新しい項目も欠けないようにする。
+  @discardableResult
+  static func loadFile(_ file: String, fallback: Data? = nil) -> String? {
+    let data = FileManager.default.contents(atPath: file)
+    guard data != nil || fallback != nil else {
       // 文言のファイルがないので、この文だけはここに書く。
       return "\(file) がありません。リポジトリの languages フォルダーを ~/.config/fm-ee2e/ にコピーしてください。"
     }
     do {
-      table = try parse(data)
+      let defaults = try fallback.map(parse) ?? [:]
+      let custom = try data.map(parse) ?? [:]
+      table = defaults.merging(custom) { _, value in value }
       return nil
     } catch {
       return "\(file) を読み込めません。\n\(errorMessage(error))"

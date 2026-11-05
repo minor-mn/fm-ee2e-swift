@@ -15,11 +15,12 @@ let package = Package(
   dependencies: [
     // Markdown のプレビュー（V）で、Markdown を読む（GitHub と同じ cmark-gfm）。
     .package(url: "https://github.com/swiftlang/swift-markdown.git", from: "0.9.0"),
+    .package(url: "https://github.com/jpsim/Yams.git", from: "6.2.2"),
   ],
   targets: [
     .target(
       name: "FmEe2eCore",
-      dependencies: [.product(name: "Markdown", package: "swift-markdown")],
+      dependencies: [.product(name: "Markdown", package: "swift-markdown"), .product(name: "Yams", package: "Yams")],
       swiftSettings: settings
     ),
     .executableTarget(name: "fm-ee2e", dependencies: ["FmEe2eCore"], swiftSettings: settings),

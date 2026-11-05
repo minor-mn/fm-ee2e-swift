@@ -15,6 +15,25 @@ private func parse(_ text: String) throws -> AppConfig { try AppConfig.parse(Dat
   #expect(config.rightTabs == RightMode.allCases.filter { $0 != .git && $0 != .ssh })
 }
 
+@Test func numbersHideAndOrderTabs() throws {
+  // 0 は使わず、1 以上は小さい順。同じ数と true は既定の並び順。
+  let config = try parse("{ right_tabs: { local: 1, container: 2, git: 0, ssh: 2, icloud: false, google_drive: 9 } }")
+  #expect(config.rightTabs == [.local, .ssh, .container, .drive])
+  // 書かなかったタブは既定の並び順の数（local 1・ssh 2・git 3・container 4・icloud 5・google_drive 6）。
+  #expect(try parse("{ right_tabs: { google_drive: 1 } }").rightTabs == [.local, .drive, .ssh, .git, .container, .icloud])
+  #expect(RightMode.allCases == [.local, .ssh, .git, .container, .icloud, .drive])
+}
+
+@Test func leftTabsHideAndOrder() throws {
+  #expect(try parse("{}").leftTabs == [.local, .ssh, .container])
+  #expect(try parse("{ left_tabs: { local: 3, ssh: 0, container: 1 } }").leftTabs == [.container, .local])
+  #expect(try parse("{ left_tabs: { local: false } }").leftTabs == [.ssh, .container])
+  // 左の窓は空にできない。右にしかないタブも書けない。
+  #expect(throws: ConfigFormatError.self) { try parse("{ left_tabs: { local: 0, ssh: 0, container: 0 } }") }
+  #expect(throws: ConfigFormatError.self) { try parse("{ left_tabs: { git: 1 } }") }
+  #expect(AppConfig(leftTabs: []).leftTabs == [.local])
+}
+
 @Test func emptyConfigIsDefault() throws {
   #expect(try parse(" \n").rightTabs == RightMode.allCases)
   #expect(try parse("{}").rightTabs == RightMode.allCases)
@@ -28,7 +47,9 @@ private func parse(_ text: String) throws -> AppConfig { try AppConfig.parse(Dat
 }
 
 @Test func badConfigIsRejected() {
-  #expect(throws: ConfigFormatError.self) { try parse(#"{ "right_tabs": { "git": 0 } }"#) }
+  #expect(throws: ConfigFormatError.self) { try parse(#"{ "right_tabs": { "git": -1 } }"#) }
+  #expect(throws: ConfigFormatError.self) { try parse(#"{ "right_tabs": { "git": 1.5 } }"#) }
+  #expect(throws: ConfigFormatError.self) { try parse(#"{ "right_tabs": { "git": "1" } }"#) }
   #expect(throws: ConfigFormatError.self) { try parse(#"{ "right_tabs": { "gitt": true } }"#) }
   #expect(throws: ConfigFormatError.self) { try parse("right_tabs:\n  git: off\n") }
   #expect(throws: ConfigFormatError.self) { try parse("[]") }

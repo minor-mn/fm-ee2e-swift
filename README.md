@@ -4,7 +4,7 @@
 
 Mac のファイルを、キーボードだけでサクサク整理するアプリです。
 
-窓が左右に分かれていて、ファイルのコピー・移動・削除・名前の変更が、キーを押すだけでできます。右の窓は、Google Drive・Git・SSH・iCloud Drive にも切り替えられます。Google Drive には、ファイルを **暗号化して**（自分にしか読めない形にして）しまっておけます。
+窓が左右に分かれていて、ファイルのコピー・移動・削除・名前の変更が、キーを押すだけでできます。右の窓は、Google Drive・Git・SSH・Container・iCloud Drive にも切り替えられます。左の窓はローカル・SSH・Container を選べます。Google Drive には、ファイルを **暗号化して**（自分にしか読めない形にして）しまっておけます。
 
 Mac 専用です。
 
@@ -46,7 +46,9 @@ curl -fsSL https://raw.githubusercontent.com/minor-mn/fm-ee2e-swift/main/scripts
 
 `Tab` を押すと、右の窓が次の順に切り替わります。
 
-**Google Drive → Git → SSH → iCloud Drive → ローカル**
+**Google Drive → Git → SSH → Container → iCloud Drive → ローカル**
+
+左の窓は `Shift+Tab` で **ローカル → SSH → Container** の順に切り替えられます。
 
 ローカル（この Mac の中のファイル）は、何もしなくても使えます。ほかのタブは、使いたいものだけ準備してください。使わないタブは、「設定を変更する」で消せます。
 
@@ -98,6 +100,16 @@ Host myserver
 
 右の窓を「SSH」にすると `myserver` のようにつなぎ先が並ぶので、選んで `return` を押すとつながります。
 
+### Container（Apple Container）
+
+[Apple Container](https://github.com/apple/container) を操作します。
+DockerやOrbStackには非対応です。 `container` コマンドがあれば使えます。
+
+SSHタブと同様にコンテナが既にあればアクセスできます。
+カレントにdocker-composeかDockerfileがあればコンテナを作れます。
+SSHタブと同様に、ゲストOSに入って、ゲストOS上のgitやテキストエディタを使う想定ですが、
+ホストOSのディレクトリをバインドする場合だけホストOSのGitを使う仕組みです。
+
 ### iCloud Drive
 
 Mac の「システム設定」→ いちばん上の自分の名前 →「iCloud」→「iCloud Drive」で、**この Mac を同期** をオンにします。
@@ -126,6 +138,8 @@ open -e ~/.config/fm-ee2e/config.json5
   language: "ja",
 ```
 
+文言はアプリ同梱の言語ファイルを基にし、`~/.config/fm-ee2e/languages` の設定を優先します。利用者の言語ファイルが古い場合も、新しく追加された文言はアプリ同梱の内容で補います。
+
 ### 使わないタブを消す
 
 `right_tabs` で `false` にしたタブは、出てこなくなります。たとえば SSH と Git を使わないなら、次のようにします。
@@ -135,6 +149,7 @@ open -e ~/.config/fm-ee2e/config.json5
     google_drive: true,
     git: false,
     ssh: false,
+    container: true,
     icloud: true,
     local: true,
   },
@@ -148,7 +163,7 @@ open -e ~/.config/fm-ee2e/config.json5
 |---|---|---|
 | `window` | 窓全体 | 透け具合（`opacity`）、後ろのぼかし（`blur`）、背景のグラデーション、上の帯の背景、下に出る知らせの文字の色、文字の種類と大きさ（`font`） |
 | `default` | すべてのタブ | 文字の色、先頭の場所（パス）の色 |
-| `local`・`git`・`ssh`・`google_drive`・`icloud` | そのタブだけ | 背景の色、背景の画像、枠の色（`accent`）、文字の色、Git の一覧や差分の色 |
+| `local`・`git`・`ssh`・`container`・`google_drive`・`icloud` | そのタブだけ | 背景の色、背景の画像、枠の色（`accent`）、文字の色、Git の一覧や差分の色 |
 
 - タブのブロックに書いていないものは、`default` の値、`default` にもなければ `window` の値が使われます。
 - 背景の画像は、`~/.config/fm-ee2e/images` に画像を置いて、そのパスを `path` に書きます。
@@ -173,6 +188,8 @@ Mac に `cwebp`・`dwebp`・`gif2webp`・`ffmpeg` が入っていれば、ロー
 ---
 
 ## アプリを自分で作る
+
+テストは `swift test` で実行できます。Apple Container のサービスが動いている環境では、`FM_EE2E_CONTAINER_TESTS=1 swift test --filter ContainerIntegrationTests` で、専用コンテナを使った起動停止・名前解決・tar 往復転送も確認できます。検証用コンテナ・ネットワーク・ボリュームはテスト終了時に削除します。
 
 ダウンロードしたアプリの代わりに、自分で作ることもできます。
 

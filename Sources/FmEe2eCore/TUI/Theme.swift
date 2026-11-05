@@ -175,6 +175,7 @@ nonisolated enum ThemeKey: String, Sendable, CaseIterable {
   case defaults = "default"
   case local
   case ssh
+  case container
   case git
   case icloud
   case drive = "google_drive"

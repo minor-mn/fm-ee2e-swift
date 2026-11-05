@@ -25,6 +25,10 @@ func drawUsage(_ screen: Screen, _ y: Int, _ pane: Pane) {
   let usage = pane.usage
   var x = 2
   x += screen.text(x, y, pane.title, bg.copyWith(fg: pane.accent, bold: true))
+  if let fields = pane.headerFields {
+    drawFields(screen, x + 3, y, fields.first ?? [])
+    return
+  }
   if let text = pane.headerText {
     screen.text(x + 3, y, truncate(text, max(0, screen.width - x - 5)), bg.copyWith(fg: Palette.muted, bold: true))
     return
@@ -41,6 +45,10 @@ func drawUsage(_ screen: Screen, _ y: Int, _ pane: Pane) {
 /// [pane] のカーソル位置の項目の所有者・グループ・パーミッション。
 func drawOwnership(_ screen: Screen, _ y: Int, _ pane: Pane) {
   let bg = Style()
+  if let fields = pane.headerFields {
+    if fields.count > 1 { drawFields(screen, 2, y, fields[1]) }
+    return
+  }
   guard let entry = pane.current, pane.placeholder == nil, let ownership = pane.ownershipOf(entry) else {
     return
   }
@@ -51,9 +59,26 @@ func drawOwnership(_ screen: Screen, _ y: Int, _ pane: Pane) {
   }
 }
 
+/// 名前（薄い色）と値を、所有者の行と同じ間隔で並べる。帯の右端を越える分は省く。
+private func drawFields(_ screen: Screen, _ start: Int, _ y: Int, _ fields: [(String, String)]) {
+  let bg = Style()
+  let end = screen.width - 2
+  var x = start
+  for (label, value) in fields {
+    guard x < end else { break }
+    x += screen.text(x, y, truncate(label, end - x), bg.copyWith(fg: Palette.muted), maxWidth: end - x)
+    guard x + 1 < end else { break }
+    x += screen.text(x + 1, y, truncate(value, end - x - 1), bg, maxWidth: end - x - 1) + 4
+  }
+}
+
 /// [pane] のマークの数とファイルの合計サイズ（ほかのフォルダーの分も含む）。[side] は「左」か「右」。
 func drawMarks(_ screen: Screen, _ y: Int, _ pane: Pane, _ side: String) {
   let marks = pane.marks.values
+  if let container = pane as? ContainerPane, container.ssh == nil {
+    screen.text(1, y, truncate(tr("container.mark_count", ["side": side, "count": marks.count]), screen.width - 2), Style(fg: Palette.lime, bold: true))
+    return
+  }
   let bytes = marks.reduce(0) { $0 + ($1.entry.size ?? 0) }
   let elsewhere = pane.marksElsewhere
   var parts = [tr("status_bars.marks", ["side": side, "count": marks.count, "size": formatBytes(bytes)])]
@@ -114,7 +139,8 @@ func drawFunctionKeys(_ screen: Screen, _ y: Int, _ keys: [(String, String)?]) {
       screen.text(x + pad, y, label, style, maxWidth: slot - pad)
       // ラベルは ASCII なので、文字の位置はそのまま桁になる。
       let letters = Array(label)
-      if let at = Array(label.uppercased()).firstIndex(of: Character(key)), pad + at < slot {
+      // 文字キーのないもの（Container の F12 など）は、どこも強めない。
+      if let char = key.first, let at = Array(label.uppercased()).firstIndex(of: char), pad + at < slot {
         screen.text(x + pad + at, y, String(letters[at]), keyStyle)
       }
     }
