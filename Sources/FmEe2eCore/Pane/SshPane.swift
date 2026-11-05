@@ -1,7 +1,7 @@
 import Foundation
 
 /// SSH の接続先のファイル。右のタブにも左のタブにも出し、左右で別々に接続する。つなぐ前は ~/.ssh/config の Host を並べる。
-final class SshPane: PathPane {
+class SshPane: PathPane {
   /// つないでいる接続先。つなぐ前は nil。
   var ssh: Ssh?
 
@@ -315,7 +315,7 @@ final class SshPane: PathPane {
     await runInTerminal(
       app,
       "\(current.host):\(PathContext.posix.join(archive.path, item.path))",
-      Ssh.executable,
+      current.executionPath,
       try current.interactiveArgs(temp, file: path),
       waitAfterExit: { _ in false }
     )
@@ -391,7 +391,7 @@ final class SshPane: PathPane {
       await runInTerminal(
         app,
         "\(current.host):\(path)",
-        Ssh.executable,
+        current.executionPath,
         try current.interactiveArgs(dir, file: path),
         waitAfterExit: { _ in false }
       )

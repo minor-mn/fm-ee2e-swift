@@ -2,28 +2,32 @@ import AppKit
 
 /// 設定ファイル（~/.config/fm-ee2e/config.json5）。
 ///
-/// ```json
+/// ```json5
 /// {
-///   "right_tabs": {
-///     "google_drive": true,
-///     "git": true,
-///     "ssh": true,
-///     "icloud": true,
-///     "local": true
-///   }
+///   right_tabs: {
+///     local: 1,
+///     ssh: 2,
+///     git: 3,
+///     container: 4,
+///     icloud: 5,
+///     google_drive: 6,
+///   },
 /// }
 /// ```
 ///
-/// ファイルや項目がなければ true。コメント（// と /* */）と末尾のカンマも書ける（JSON5）。
+/// right_tabs（右の窓・Tab）と left_tabs（左の窓・Shift+Tab。local・ssh・container）は、0 なら使わず、
+/// 1 以上は小さい順に切り替える。true・false も書ける（true は上の順）。ファイルや項目がなければ上の順で使う。コメント（// と /* */）と末尾のカンマも書ける（JSON5）。
 struct AppConfig {
   init(
     language: String = "ja",
     rightTabs: [RightMode] = RightMode.allCases,
+    leftTabs: [LeftMode] = LeftMode.allCases,
     appearance: Appearance = .standard,
     yenToBackslash: Bool = true
   ) {
     self.language = language
     self.rightTabs = rightTabs
+    self.leftTabs = leftTabs.isEmpty ? [.local] : leftTabs
     self.appearance = appearance
     self.yenToBackslash = yenToBackslash
   }
@@ -33,6 +37,9 @@ struct AppConfig {
 
   /// 右の窓に出すタブ（Tab で切り替える順）。
   let rightTabs: [RightMode]
+
+  /// 左の窓に出すタブ（Shift+Tab で切り替える順）。左の窓は空にできないので、いつも1つ以上。
+  let leftTabs: [LeftMode]
 
   /// 見た目（appearance）。書き方は [parseAppearance]。
   let appearance: Appearance
@@ -44,11 +51,19 @@ struct AppConfig {
 
   /// 設定ファイルでのタブの名前（書く順）。
   private static let tabNames: [(String, RightMode)] = [
-    ("google_drive", .drive),
-    ("git", .git),
-    ("ssh", .ssh),
-    ("icloud", .icloud),
     ("local", .local),
+    ("ssh", .ssh),
+    ("git", .git),
+    ("container", .container),
+    ("icloud", .icloud),
+    ("google_drive", .drive),
+  ]
+
+  /// 設定ファイルでの左のタブの名前（書く順）。
+  private static let leftTabNames: [(String, LeftMode)] = [
+    ("local", .local),
+    ("ssh", .ssh),
+    ("container", .container),
   ]
 
   /// [file] を読む。なければ既定の設定。形式が違えば [ConfigFormatError]。
@@ -74,7 +89,7 @@ struct AppConfig {
     guard let root = json as? [String: Any] else {
       throw ConfigFormatError(tr("app_config.root_not_object"))
     }
-    let rootKeys = ["language", "right_tabs", "appearance", "yen_to_backslash"]
+    let rootKeys = ["language", "right_tabs", "left_tabs", "appearance", "yen_to_backslash"]
     for key in root.keys where !rootKeys.contains(key) {
       throw ConfigFormatError(tr("app_config.unknown_root_key", ["key": key, "names": list(rootKeys)]))
     }
@@ -93,33 +108,51 @@ struct AppConfig {
     }
     return AppConfig(
       language: language,
-      rightTabs: try parseRightTabs(root["right_tabs"]),
+      rightTabs: try parseTabs(root["right_tabs"], "right_tabs", tabNames),
+      leftTabs: try leftTabs(root["left_tabs"]),
       appearance: appearance,
       yenToBackslash: yenToBackslash
     )
   }
 
-  /// right_tabs を読む。false のタブを除いた、出すタブ。
-  private static func parseRightTabs(_ value: Any?) throws -> [RightMode] {
+  /// left_tabs を読む。左の窓は空にできないので、全部 0 ならエラー。
+  private static func leftTabs(_ value: Any?) throws -> [LeftMode] {
+    let tabs = try parseTabs(value, "left_tabs", leftTabNames)
+    if tabs.isEmpty { throw ConfigFormatError(tr("app_config.left_tabs_empty")) }
+    return tabs
+  }
+
+  /// right_tabs・left_tabs を読む。使うタブを、切り替える順に並べたもの。
+  /// 0（false）は使わない。1 以上は小さい順で、同じ数なら [names] の順。true と書かなかったタブは [names] の順の数。
+  private static func parseTabs<Mode: Hashable>(_ value: Any?, _ key: String, _ names: [(String, Mode)]) throws -> [Mode] {
+    let order = names.map(\.1)
     guard let value, !(value is NSNull) else {
-      return RightMode.allCases
+      return order
     }
     guard let entries = value as? [String: Any] else {
-      throw ConfigFormatError(tr("app_config.right_tabs_not_object"))
+      throw ConfigFormatError(tr("app_config.tabs_not_object", ["name": key]))
     }
-    var off = Set<RightMode>()
-    for (key, value) in entries {
-      guard let mode = tabNames.first(where: { $0.0 == key })?.1 else {
-        throw unknownKey("right_tabs", key, tabNames.map(\.0))
+    var ranks: [Mode: Int] = [:]
+    for (index, mode) in order.enumerated() { ranks[mode] = index + 1 }
+    for (tab, value) in entries {
+      guard let mode = names.first(where: { $0.0 == tab })?.1 else {
+        throw unknownKey(key, tab, names.map(\.0))
       }
-      guard let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else {
-        throw ConfigFormatError(tr("app_config.right_tabs_not_bool", ["key": key]))
+      guard let number = value as? NSNumber else {
+        throw ConfigFormatError(tr("app_config.tabs_bad_value", ["name": key, "key": tab]))
       }
-      if !number.boolValue {
-        off.insert(mode)
+      if CFGetTypeID(number) == CFBooleanGetTypeID() {
+        if !number.boolValue { ranks[mode] = 0 }
+        continue
       }
+      guard number.doubleValue >= 0, number.doubleValue == number.doubleValue.rounded(), number.doubleValue <= Double(Int32.max) else {
+        throw ConfigFormatError(tr("app_config.tabs_bad_value", ["name": key, "key": tab]))
+      }
+      ranks[mode] = number.intValue
     }
-    return RightMode.allCases.filter { !off.contains($0) }
+    return order.filter { ranks[$0]! > 0 }.sorted {
+      (ranks[$0]!, order.firstIndex(of: $0)!) < (ranks[$1]!, order.firstIndex(of: $1)!)
+    }
   }
 
   /// appearance を読む。

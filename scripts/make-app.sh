@@ -11,6 +11,7 @@ cp .build/release/fm-ee2e "$app/Contents/MacOS/fm-ee2e"
 icons=.build/AppIcon.iconset
 rm -rf "$icons"
 mkdir -p "$icons" "$app/Contents/Resources"
+cp -R fm-ee2e/languages "$app/Contents/Resources/"
 swift scripts/make-icon.swift .build/AppIcon.png
 for n in 16 32 128 256 512; do
   sips -z $n $n .build/AppIcon.png --out "$icons/icon_${n}x${n}.png" >/dev/null

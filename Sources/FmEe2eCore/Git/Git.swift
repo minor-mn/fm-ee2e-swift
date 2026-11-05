@@ -49,7 +49,7 @@ final class Git {
   /// 接続先の git で、引数を sh の言葉にできない（改行を含むなど）ときは失敗する。
   func commandLine(_ args: [String], tty: Bool = false) throws -> (String, [String]) {
     if let remote = ssh {
-      return (Ssh.executable, try remote.gitArgs(args, tty: tty))
+      return (remote.executionPath, try remote.gitArgs(args, tty: tty))
     }
     return (executable, args)
   }

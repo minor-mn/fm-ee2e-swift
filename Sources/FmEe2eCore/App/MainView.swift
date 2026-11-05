@@ -1,9 +1,8 @@
-/// FD風の2画面。左はローカル・SSH の接続先（Shift+Tab で切り替える）、
-/// 右は Google Drive・git status・SSH の接続先・iCloud Drive・ローカル（Tab で切り替える）。
-/// 右の窓に出すタブは設定ファイル（[AppConfig]）で選び、false のタブは使わない（確かめもしない）。
-/// 左の SSH は、右の SSH のタブが on のときだけ使える。
+/// FD風の2画面。左はローカル・SSH・Container（Shift+Tab で切り替える）、
+/// 右はローカル・SSH・git status・Container・iCloud Drive・Google Drive（Tab で切り替える）。
+/// 左右の窓に出すタブと順番は設定ファイル（[AppConfig] の left_tabs・right_tabs）で選び、0 のタブは使わない（確かめもしない）。
 final class MainView: View, Workspace {
-  init(_ app: App, config: AppConfig = AppConfig()) {
+  init(_ app: App, config: AppConfig = AppConfig(), containerClient: ContainerClient = ContainerClient()) {
     self.app = app
     self.config = config
     local = LocalPane(app)
@@ -12,10 +11,15 @@ final class MainView: View, Workspace {
     drive = DrivePane(app)
     ssh = SshPane(app)
     sshLeft = SshPane(app)
+    container = ContainerPane(app, client: containerClient)
+    containerLeft = ContainerPane(app, client: containerClient)
     noTab = NoTabPane(app, ["main_view.no_tab.title", "main_view.no_tab.hint"])
     gitChecking = NoTabPane(app, ["main_view.git_checking"])
     rightMode = Self.startMode(config)
+    leftMode = config.leftTabs[0]
     preview = PreviewOverlay(app)
+    container.localDirectory = { [unowned self] in local.dir }
+    containerLeft.localDirectory = { [unowned self] in localRight.dir }
     // 左の SSH を切る（別の接続先につなぎ直すときを含む）前に、それを経由する右の SSH を切る。
     sshLeft.beforeDisconnect = { [unowned self] connection in
       if ssh.ssh?.via === connection {
@@ -25,6 +29,8 @@ final class MainView: View, Workspace {
     // フォーマットの変換（F・F9）に使えるコマンドは、起動時に一度だけ探す。
     locateConverters()
     Task { await local.load() }
+    if leftMode == .ssh { Task { await sshLeft.load() } }
+    if leftMode == .container { Task { await containerLeft.load() } }
     let (driveChecked, gitFound) = startTabs(config.rightTabs)
     Task { await chooseStartRight(driveChecked, gitFound) }
   }
@@ -36,6 +42,7 @@ final class MainView: View, Workspace {
     if modes.contains(.ssh) { Task { await ssh.load() } }
     if modes.contains(.icloud) { Task { await icloud.check() } }
     if modes.contains(.local) { Task { await localRight.load() } }
+    if modes.contains(.container), rightMode == .container { Task { await container.load() } }
     let gitFound = Task {
       if modes.contains(.git) && gitPane == nil {
         let found = (try? await Git.locate()) ?? nil
@@ -53,6 +60,11 @@ final class MainView: View, Workspace {
   func apply(_ next: AppConfig) {
     let added = next.rightTabs.filter { !config.rightTabs.contains($0) }
     config = next
+    if !next.leftTabs.contains(leftMode) {
+      leftMode = next.leftTabs[0]
+      if leftMode == .ssh && sshLeft.entries.isEmpty && !sshLeft.loading { Task { await sshLeft.load() } }
+      if leftMode == .container { Task { await containerLeft.load() } }
+    }
     startTabs(added)
     let modes = rightModes
     if !modes.contains(rightMode), let first = modes.first {
@@ -73,7 +85,9 @@ final class MainView: View, Workspace {
   /// Tab で切り替える右の窓のタブ。git は見つかったときだけ。左が SSH のときは、ローカル・git・SSH だけ。
   private var rightModes: [RightMode] {
     config.rightTabs.filter { mode in
-      (mode != .git || gitPane != nil) && (leftMode == .local || [.local, .git, .ssh].contains(mode))
+      (mode != .git || gitPane != nil)
+        && (leftMode != .ssh || [.local, .git, .ssh, .container].contains(mode))
+        && (leftMode != .container || [.local, .git, .container].contains(mode))
     }
   }
 
@@ -104,12 +118,17 @@ final class MainView: View, Workspace {
     app.requestRender()
   }
 
-  /// git の窓に、左の窓のフォルダーのリポジトリを出す。左が SSH なら接続先のリポジトリ。
+  /// git の窓に、左の窓のフォルダーのリポジトリを出す。左が SSH・Container なら接続先（コンテナの中）のリポジトリ。
   private func showGitPane() async {
     switch (leftMode, sshLeft.ssh) {
     case (.local, _): await gitPane!.show(local.dir)
     case (.ssh, let remote?): await gitPane!.showRemote(remote, sshLeft.dir)
     case (.ssh, nil): await gitPane!.showNotice([tr("main_view.choose_left_ssh")])
+    case (.container, _):
+      // バインドマウントの中は Mac のフォルダーそのものなので、Mac の git で見る（コンテナの git は古いことがある）。
+      if let remote = containerLeft.ssh as? ContainerConnection, let host = remote.hostPath(containerLeft.dir) { await gitPane!.show(host) }
+      else if let remote = containerLeft.ssh { await gitPane!.showRemote(remote, containerLeft.dir) }
+      else { await gitPane!.showNotice([tr("main_view.choose_left_container")]) }
     }
   }
 
@@ -125,6 +144,8 @@ final class MainView: View, Workspace {
   /// SSH の窓。つなぐ前は ~/.ssh/config の Host を並べる。
   let ssh: SshPane
   let sshLeft: SshPane
+  let container: ContainerPane
+  let containerLeft: ContainerPane
   var rightActive = false
 
   var gitPane: GitPane?
@@ -157,6 +178,7 @@ final class MainView: View, Workspace {
     switch leftMode {
     case .local: local
     case .ssh: sshLeft
+    case .container: containerLeft
     }
   }
 
@@ -167,6 +189,7 @@ final class MainView: View, Workspace {
     switch rightMode {
     case .git: return gitPane!
     case .ssh: return ssh
+    case .container: return container
     case .drive: return drive
     case .icloud: return icloud
     case .local: return localRight
@@ -176,7 +199,7 @@ final class MainView: View, Workspace {
   var active: Pane { rightActive ? right : left }
 
   /// すべての窓。
-  private var panes: [Pane] { [local, sshLeft, drive] + (gitPane.map { [$0] } ?? []) + [ssh, icloud, localRight] }
+  private var panes: [Pane] { [local, sshLeft, containerLeft, drive] + (gitPane.map { [$0] } ?? []) + [ssh, container, icloud, localRight] }
 
   // ---- 描画 ----
 
@@ -215,7 +238,7 @@ final class MainView: View, Workspace {
       }
     }
     if let marked = panes.first(where: { !$0.marks.isEmpty }) {
-      drawMarks(screen, h - 4, marked, marked === local || marked === sshLeft ? tr("main_view.side.left") : tr("main_view.side.right"))
+      drawMarks(screen, h - 4, marked, marked === local || marked === sshLeft || marked === containerLeft ? tr("main_view.side.left") : tr("main_view.side.right"))
     }
     drawInfo(screen, h - 3)
     drawFunctionKeyBar(screen, h - 1)
@@ -230,10 +253,11 @@ final class MainView: View, Workspace {
       case .local: source = localRight
       case .icloud: source = icloud
       case .ssh: source = ssh
+      case .container: source = container
       default: source = nil
       }
     } else {
-      source = leftMode == .ssh ? sshLeft : (rightMode == .ssh ? nil : local)
+      source = leftMode == .ssh ? sshLeft : leftMode == .container ? containerLeft : ([.ssh, .container].contains(rightMode) ? nil : local)
     }
     guard let source, let (entry, kind) = preview.target(source) else {
       return nil
@@ -256,24 +280,38 @@ final class MainView: View, Workspace {
       ("char: ", "Space", tr("main_view.keys.mark")),
       ("tab", "Tab", tr("main_view.keys.tab")),
     ]
-    if uses(.ssh) {
+    if config.leftTabs.count > 1 {
       keys.append(("backTab", "Shift+Tab", tr("main_view.keys.left_tab")))
     }
     keys.append(("left", "←→", tr("main_view.keys.switch_pane")))
     keys.append(("ctrl:l", "Ctrl+L", "Location"))
     keys.append(("char:o", "O", "clOse"))
-    drawKeyHints(screen, y, keys.filter { canPress($0.0) }.map { ($0.1, $0.2) }, note: c.map {
+    drawKeyHints(screen, y, keys.filter { canPress($0.0) }.map { ($0.1, operationLabel($0.0, fallback: $0.2)) }, note: c.map {
       tr("main_view.clip.note", ["action": $0.move ? tr("main_view.clip.move") : tr("main_view.clip.copy"), "count": $0.length])
     })
   }
 
   private func drawFunctionKeyBar(_ screen: Screen, _ y: Int) {
     screen.fill(0, y, screen.width, 1, Style())
+    if let keys = active.functionKeyLayout {
+      drawFunctionKeys(screen, y, keys)
+      return
+    }
     // F12（G）は、選んでいる窓で G を押したときの転送。Google Drive は暗号化して転送、Git は Git コマンド、SSH は scp、
     // iCloud Drive・右のローカルはコピー。向き（左→右・右→左）は名前の矢印で見せる。
     // 選んでいる窓で使えないキーは、名前を出さずに空ける（キーの位置は変えない）。
-    let keys = functionKeys.map { key in key.flatMap { canPress("char:\($0.1.lowercased())") ? $0 : nil } }
+    let keys = functionKeys.map { key -> (String, String)? in
+      guard let (label, character) = key else { return nil }
+      let id = "char:\(character.lowercased())"
+      guard canPress(id) else { return nil }
+      return (operationLabel(id, fallback: label), character)
+    }
     drawFunctionKeys(screen, y, keys + [canPress("char:g") ? (transferCommand?.label ?? "", "G") : nil])
+  }
+
+  private func operationLabel(_ id: String, fallback: String) -> String {
+    guard let operation = operationForKey(id), let command = active.commands[operation], !command.label.isEmpty else { return fallback }
+    return command.label
   }
 
   /// 選んでいる窓で、キー [id]（[keyId] の名前）を押して何かできるか。読むだけの場所での書き込む操作は、できないとする。
@@ -282,7 +320,7 @@ final class MainView: View, Workspace {
     if !pane.allowsKey(id) {
       return false
     }
-    if let operation = Self.operations[id] {
+    if let operation = operationForKey(id) {
       guard let command = operation == .transfer ? transferCommand : pane.commands[operation] else {
         return false
       }
@@ -305,6 +343,11 @@ final class MainView: View, Workspace {
   /// 選んでいる窓で G・F12 を押したときに実行するコマンド。左の窓の G は右のタブが決め、右の窓の G は右のタブ自身が持つ。
   /// 左が SSH のときは、右がローカル（左の接続先との scp）・Git（Git コマンド）・SSH（左の接続先からつないだ接続先との scp）。
   private var transferCommand: Command? {
+    // 右が Git なら、左が Container でも G は Git のコマンド。
+    if (left is ContainerPane || right is ContainerPane) && !showGit {
+      guard (left is ContainerPane && right is LocalPane) || (left is LocalPane && right is ContainerPane) else { return nil }
+      return ContainerTransfer(upload: active is LocalPane)
+    }
     if leftMode == .ssh && rightMode == .local {
       return rightActive ? RightLocalUpload() : LeftSshDownload()
     }
@@ -327,9 +370,10 @@ final class MainView: View, Workspace {
     let pane = active
     let id = Self.keyId(key)
     // 操作のキーは、選んでいるタブがその操作のコマンドを持っていれば実行する。
-    if let operation = Self.operations[id] {
+    if let operation = operationForKey(id) {
+      guard pane.allowsKey(id) else { return }
       // 左が SSH のときは、左の SSH の窓が持つ転送（左のローカルへのダウンロード）ではなく、右のタブで決まる転送にする。
-      if operation == .transfer && leftMode == .ssh {
+      if operation == .transfer {
         if let command = transferCommand {
           run { await runCommand(command, self) }
         }
@@ -363,8 +407,8 @@ final class MainView: View, Workspace {
     case "end":
       pane.move(pane.entries.count)
     case "tab":
-      // 右の窓を Google Drive → git（git があるとき）→ SSH → iCloud Drive → ローカルの順に切り替える。
-      // 設定ファイルで off のタブと、左が SSH のときに使えないタブは飛ばす。
+      // 右の窓を、設定ファイルの right_tabs の数の小さい順に切り替える（git は見つかったときだけ）。
+      // 0 のタブと、左の窓のタブで使えないタブは飛ばす。
       let modes = rightModes
       if modes.isEmpty {
         return
@@ -378,6 +422,7 @@ final class MainView: View, Workspace {
       if showGit {
         Task { await showGitPane() }
       }
+      if rightMode == .container { run { await self.container.load() } }
       app.requestRender()
     case "backTab":
       switchLeft()
@@ -461,12 +506,18 @@ final class MainView: View, Workspace {
     "char:g": .transfer,
   ]
 
+  private func operationForKey(_ id: String) -> Operation? {
+    active.keyOperations[id] ?? Self.operations[id]
+  }
+
   /// 非同期の操作を1つずつ実行する。終わったら、git の窓を出していれば読み直す（フォルダーの移動やファイルの操作に合わせる）。
   /// 読み直しは待たずに、次のキーを受け付ける。
   private func run(_ action: @escaping () async -> Void) {
     busy = true
     Task {
       await action()
+      if rightMode == .container { await container.refreshContext() }
+      if leftMode == .container { await containerLeft.refreshContext() }
       busy = false
       if showGit {
         Task { await showGitPane() }
@@ -486,16 +537,17 @@ final class MainView: View, Workspace {
     Task { await ssh.follow(via, waiting: leftMode == .ssh && via == nil) }
   }
 
-  /// 左の窓をローカルと SSH で切り替える（Shift+Tab）。SSH のタブが off なら何もしない。
-  /// 右に左が SSH のときに使えないタブを出していれば、右をローカル（off なら使えるうち最初のタブ）にする。
+  /// 左の窓を、設定ファイルの left_tabs の順に切り替える（Shift+Tab）。0 のタブは飛ばす。
+  /// 右に左のタブで使えないタブを出していれば、右をローカル（off なら使えるうち最初のタブ）にする。
   private func switchLeft() {
-    if !uses(.ssh) {
-      return
-    }
-    leftMode = leftMode == .local ? .ssh : .local
+    let leftModes = config.leftTabs
+    guard leftModes.count > 1 else { return }
+    let index = leftModes.firstIndex(of: leftMode) ?? 0
+    leftMode = leftModes[(index + 1) % leftModes.count]
     if leftMode == .ssh && sshLeft.entries.isEmpty && !sshLeft.loading {
       Task { await sshLeft.load() }
     }
+    if leftMode == .container { run { await self.containerLeft.load() } }
     let modes = rightModes
     if !modes.contains(rightMode) && !modes.isEmpty {
       rightMode = modes.contains(.local) ? .local : modes[0]

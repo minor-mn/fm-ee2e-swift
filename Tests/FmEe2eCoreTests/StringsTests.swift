@@ -68,4 +68,25 @@ struct StringsTests {
     #expect(tr("a.none") == "a.none")
     #expect(throws: ConfigFormatError.self) { try Strings.parse(Data("{ a: 1 }".utf8)) }
   }
+
+  @Test("古い利用者設定で欠けた文言を同梱データで補い、利用者の変更を優先する")
+  func bundledDefaults() throws {
+    let saved = Strings.table
+    defer { Strings.table = saved }
+    let directory = FileManager.default.temporaryDirectory.appendingPathComponent("fm-strings-\(UUID().uuidString)")
+    try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let file = directory.appendingPathComponent("en.json5")
+    let defaults = Data(#"{pane:{loading:"Loading"},container:{start:"Start"}}"#.utf8)
+    try Data(#"{pane:{loading:"Custom loading"}}"#.utf8).write(to: file)
+    #expect(Strings.loadFile(file.path, fallback: defaults) == nil)
+    #expect(tr("pane.loading") == "Custom loading")
+    #expect(tr("container.start") == "Start")
+    try Data("invalid".utf8).write(to: file)
+    #expect(Strings.loadFile(file.path, fallback: defaults) != nil)
+    #expect(tr("pane.loading") == "Custom loading")
+    try FileManager.default.removeItem(at: file)
+    #expect(Strings.loadFile(file.path, fallback: defaults) == nil)
+    #expect(tr("pane.loading") == "Loading")
+  }
 }

@@ -471,6 +471,12 @@ class ScpCommand: Command {
   /// 送り先の中で移す。
   func destMove(_ remote: Ssh, _ from: String, _ to: String) async throws { fatalError("destMove") }
 
+  /// 転送手段だけを差し替える（SSH は scp、Container は tar のパイプ）。
+  func transfer(_ remote: Ssh, _ from: String, _ to: String) async throws -> ProcResult {
+    let (program, args) = try remote.scpCommand(try sourceArg(remote, from), try destArg(remote, to))
+    return try await runProcess(program, args)
+  }
+
   override func run(_ c: CommandContext) async {
     let pane = c.pane
     let app = c.app
@@ -537,8 +543,7 @@ class ScpCommand: Command {
           staging = try await createStaging(c, remote)
           let payload = destContext.join(staging!, "payload")
           let previous = destContext.join(staging!, "previous")
-          let (program, args) = try remote.scpCommand(try sourceArg(remote, job.from), try destArg(remote, payload))
-          let result = try await runProcess(program, args)
+          let result = try await transfer(remote, job.from, payload)
           if result.exitCode != 0 {
             let message = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
             errors.append("\(name): \(message.isEmpty ? exitStatusText(result.exitCode) : message)")

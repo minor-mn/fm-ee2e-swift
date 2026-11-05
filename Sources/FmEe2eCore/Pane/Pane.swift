@@ -202,6 +202,9 @@ class Pane {
   /// 項目の所有者など。ローカル以外は nil。
   func ownershipOf(_ entry: Entry) -> Ownership? { nil }
 
+  /// 上の帯の2行（容量と所有者の行）の代わりに出す、名前と値の組。nil ならいつもの容量と所有者を出す。
+  var headerFields: [[(String, String)]]? { nil }
+
   var current: Entry? { entries.isEmpty ? nil : entries[min(max(cursor, 0), entries.count - 1)] }
 
   /// 開いているフォルダー（[Mark.parent] と同じ形）。
@@ -477,6 +480,12 @@ class Pane {
 
   /// このタブで使える操作と、そのコマンド。ここにない操作のキーは何もしない。
   var commands: [Operation: Command] { [:] }
+
+  /// この画面だけで意味を変えるキー。
+  var keyOperations: [String: Operation] { [:] }
+
+  /// タブ固有のファンクションキー。nil なら共通の並びを使う。
+  var functionKeyLayout: [(String, String)?]? { nil }
 
   /// 右に出しているときの G・F12 の転送。右に出すタブだけが持つ。
   var transferCommand: Command? { nil }

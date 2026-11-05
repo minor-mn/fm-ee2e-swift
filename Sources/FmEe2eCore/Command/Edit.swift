@@ -56,7 +56,7 @@ final class GitEdit: EditCommand {
       _ = await runInTerminal(
         c.app,
         "\(ssh.host):\(path)",
-        Ssh.executable,
+        ssh.executionPath,
         try ssh.interactiveArgs(folder, file: path),
         waitAfterExit: { _ in false }
       )
