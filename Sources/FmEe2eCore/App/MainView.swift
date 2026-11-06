@@ -371,7 +371,9 @@ final class MainView: View, Workspace {
     let id = Self.keyId(key)
     // 操作のキーは、選んでいるタブがその操作のコマンドを持っていれば実行する。
     if let operation = operationForKey(id) {
-      guard pane.allowsKey(id) else { return }
+      // タブ固有のキー（Container の F1〜F5・F12 など）は、そのとき出しているものだけ効かせる。
+      // 共通のキー（Enter など）は、これまでどおりタブのコマンドがあるかで決める（SSH の接続前の Enter を止めない）。
+      if pane.keyOperations[id] != nil && !pane.allowsKey(id) { return }
       // 左が SSH のときは、左の SSH の窓が持つ転送（左のローカルへのダウンロード）ではなく、右のタブで決まる転送にする。
       if operation == .transfer {
         if let command = transferCommand {
