@@ -6,6 +6,13 @@ protocol View: AnyObject {
 
   /// キーを処理する。
   func handleKey(_ key: Key)
+
+  /// いまキーを受けている入力欄。なければ nil。
+  var focusedField: InputField? { get }
+}
+
+extension View {
+  var focusedField: InputField? { nil }
 }
 
 /// 描画とキー入力の振り分け。ダイアログは積み重ね、最前面だけがキーを受け取る。
@@ -33,6 +40,7 @@ final class App {
 
   func run(_ initial: View) async {
     root = initial
+    host.focusedField = { [unowned self] in (modals.last ?? root)?.focusedField }
     host.keys.listen { [unowned self] key in
       let target = modals.last ?? root!
       target.handleKey(key)

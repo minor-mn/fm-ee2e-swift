@@ -596,5 +596,5 @@ final class ShellTerminal {
   }
 }
 
-/// Dart の int.clamp。
+/// [value] を [low]〜[high] に収める。
 private func clamp(_ value: Int, _ low: Int, _ high: Int) -> Int { min(max(value, low), high) }

@@ -35,7 +35,7 @@ final class LocalCompletion: CompletionSource {
   func files(_ dir: String) async throws -> [String: Bool] { localFiles(dir, cwd) }
 }
 
-/// Dart の RegExp の \s に当たる空白か。
+/// 正規表現の \s に当たる空白か。
 nonisolated func isRegExpSpace(_ c: Unicode.Scalar) -> Bool {
   switch c.value {
   case 0x09...0x0D, 0x20, 0xA0, 0x1680, 0x2000...0x200A, 0x2028, 0x2029, 0x202F, 0x205F, 0x3000, 0xFEFF: true
@@ -43,7 +43,7 @@ nonisolated func isRegExpSpace(_ c: Unicode.Scalar) -> Bool {
   }
 }
 
-/// Dart の String.compareTo と同じ、UTF-16 の並び順。
+/// UTF-16 の並び順。
 nonisolated func codeUnitsBefore(_ a: String, _ b: String) -> Bool { a.utf16.lexicographicallyPrecedes(b.utf16) }
 
 private nonisolated func startsWith(_ s: String, _ prefix: String) -> Bool {

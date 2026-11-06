@@ -723,8 +723,12 @@ final class GridView: NSView, NSTextInputClient {
     }
   }
 
-  /// ⌘A で、枠の中の端末の出力（流れた行を含む）をすべて選ぶ。
+  /// ⌘A で、入力欄があればその文字をすべて選び、なければ枠の中の端末の出力（流れた行を含む）をすべて選ぶ。
   @objc override func selectAll(_ sender: Any?) {
+    if focusedField != nil {
+      host.sendKey(.named("selectAll"))
+      return
+    }
     guard let screen = host.screen else { return }
     var found: SelectionSource?
     walk(screen, gridOrigin, nil) { _, _, source in
@@ -781,11 +785,15 @@ final class GridView: NSView, NSTextInputClient {
     }
   }
 
+  /// 枠の中で選んだ文字、なければ入力欄で選んでいる文字をコピーする。
   @objc func copy(_ sender: Any?) {
-    guard let text = selectedText() else { return }
+    guard let text = selectedText() ?? focusedField?.selectedText else { return }
     NSPasteboard.general.clearContents()
     NSPasteboard.general.setString(text, forType: .string)
   }
+
+  /// キーを受けている入力欄。枠の中の端末がキーを受けているときは nil。
+  private var focusedField: InputField? { host.inputFilter == nil ? host.focusedField?() : nil }
 
   /// 貼り付けは、端末と同じく bracketed paste の形で送る（改行は CR にする）。
   @objc func paste(_ sender: Any?) {
@@ -834,7 +842,8 @@ final class GridView: NSView, NSTextInputClient {
       host.send(bytes)
       return
     }
-    if let bytes = Self.encode(event) {
+    // Shift+矢印・Home・End を区別して送るのはアプリの画面だけ。枠の中の端末には今までどおり Shift なしで送る。
+    if let bytes = Self.encode(event, shiftedMoves: host.inputFilter == nil) {
       host.send(bytes)
       return
     }
@@ -853,11 +862,15 @@ final class GridView: NSView, NSTextInputClient {
   }
 
   /// 文字以外のキーと Ctrl+キーを、端末と同じバイト列にする。文字のキーは nil（日本語入力を通す）。
-  private static func encode(_ event: NSEvent) -> [UInt8]? {
+  /// [shiftedMoves] なら、Shift+矢印・Home・End を xterm と同じ修飾キーつきの形（ESC [1;2D など）にする。
+  private static func encode(_ event: NSEvent, shiftedMoves: Bool) -> [UInt8]? {
     let flags = event.modifierFlags
     if let special = specialKeys[event.keyCode] {
       if event.keyCode == 48 && flags.contains(.shift) {
         return Array("\u{1b}[Z".utf8)
+      }
+      if shiftedMoves && flags.contains(.shift), let final = shiftedMoveKeys[event.keyCode] {
+        return Array("\u{1b}[1;2\(final)".utf8)
       }
       return Array(special.utf8)
     }
@@ -886,6 +899,9 @@ final class GridView: NSView, NSTextInputClient {
     96: "\u{1b}[15~", 97: "\u{1b}[17~", 98: "\u{1b}[18~", 100: "\u{1b}[19~",
     101: "\u{1b}[20~", 109: "\u{1b}[21~", 103: "\u{1b}[23~", 111: "\u{1b}[24~",
   ]
+
+  /// Shift つきで送る矢印・Home・End のキーコードと、その終端の文字。
+  private static let shiftedMoveKeys: [UInt16: Character] = [123: "D", 124: "C", 125: "B", 126: "A", 115: "H", 119: "F"]
 
   // ---- 日本語入力（NSTextInputClient） ----
 

@@ -82,7 +82,7 @@ nonisolated func regexGroup(_ m: Regex<AnyRegexOutput>.Match, _ i: Int) -> Strin
   m.output[i].substring.map(String.init)
 }
 
-/// Dart の DateTime(year, month, day, hour, minute) と同じ、この Mac の時間帯の日時。
+/// この Mac の時間帯の、年・月・日・時・分の日時。
 nonisolated func localDateTime(_ year: Int, _ month: Int, _ day: Int, _ hour: Int = 0, _ minute: Int = 0) -> Date {
   var calendar = Calendar(identifier: .gregorian)
   calendar.timeZone = .current
@@ -156,7 +156,7 @@ private nonisolated func date(_ m: Regex<AnyRegexOutput>.Match, _ now: Date) -> 
 
 /// [dir] の直下の項目。中のファイルからしか分からないフォルダーも補う。
 nonisolated func archiveChildren(_ items: [ArchiveItem], _ dir: String) -> [ArchiveItem] {
-  // 書いた順に並べる（Dart の Map と同じ）。
+  // 書いた順に並べる。
   var order: [String] = []
   var children: [String: ArchiveItem] = [:]
   let prefix = dir.isEmpty ? "" : "\(dir)/"

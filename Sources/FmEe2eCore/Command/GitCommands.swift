@@ -48,7 +48,7 @@ final class GitEnter: EnterCommand {
   }
 }
 
-/// 重なりを除いた、最初に出てきた順の並び（Dart の Set リテラルと同じ）。
+/// 重なりを除いた、最初に出てきた順の並び。
 private func distinct(_ items: [String]) -> [String] {
   var seen = Set<String>()
   return items.filter { seen.insert($0).inserted }

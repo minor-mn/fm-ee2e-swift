@@ -24,7 +24,7 @@ class Notifier {
   }
 }
 
-/// 値の通知（Dart の broadcast な Stream の代わり）。
+/// 値の通知。受け手が何人いてもよい。
 final class Broadcast<T> {
   private var listeners: [(id: Int, listener: (T) -> Void)] = []
   private var nextId = 0
@@ -61,7 +61,7 @@ final class Broadcast<T> {
   }
 }
 
-/// 一定時間後に1回だけ呼ぶ（Dart の Timer の代わり）。メインスレッドで呼ぶ。
+/// 一定時間後に1回だけ呼ぶ。メインスレッドで呼ぶ。
 final class OneShotTimer {
   private var item: DispatchWorkItem?
 
@@ -79,7 +79,7 @@ final class OneShotTimer {
   }
 }
 
-/// 一定間隔で呼ぶ（Dart の Timer.periodic の代わり）。メインスレッドで呼ぶ。
+/// 一定間隔で呼ぶ。メインスレッドで呼ぶ。
 final class PeriodicTimer {
   private let source: DispatchSourceTimer
 

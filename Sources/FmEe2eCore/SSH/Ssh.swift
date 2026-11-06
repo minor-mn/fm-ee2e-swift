@@ -385,7 +385,7 @@ nonisolated func parseRemoteList(_ out: Data, _ now: Date) -> [RemoteEntry] {
     return []
   }
   func decode(_ bytes: Data) -> String { String(decoding: bytes, as: UTF8.self) }
-  // 名前は（正規化で同じとみなさないよう）バイト列で引き、書いた順に並べる（Dart の Map と同じ）。
+  // 名前は（正規化で同じとみなさないよう）バイト列で引き、書いた順に並べる。
   var names: [String] = []
   var kinds: [[UInt8]: Bool] = [:]
   for item in decode(out[(split + 1)...]).components(separatedBy: "\0") where item.utf16.count > 1 {

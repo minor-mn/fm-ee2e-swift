@@ -19,9 +19,9 @@ enum KeyFile {
   }
 
   /// 鍵テキストを解析する。ペーストされたテキストの前後の空白や改行は許容する。
-  /// 形式が違えば [AppError]（Dart 版の FormatException）。
+  /// 形式が違えば [AppError]。
   static func decode(_ text: String) throws -> Data {
-    // Dart の String.trim と同じく BOM も空白として扱う。
+    // BOM も空白として扱う。
     let blank = CharacterSet.whitespacesAndNewlines.union(CharacterSet(charactersIn: "\u{FEFF}"))
     let lines = text.components(separatedBy: "\n").map { $0.trimmingCharacters(in: blank) }.filter { !$0.isEmpty }
     if lines.count != 2 || lines[0] != header {

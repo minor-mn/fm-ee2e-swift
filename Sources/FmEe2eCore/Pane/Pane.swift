@@ -71,7 +71,7 @@ struct Mark {
   let parent: String
 }
 
-/// Dart の String.compareTo と同じく、UTF-16 の符号単位で比べる。
+/// UTF-16 の符号単位で比べる。
 nonisolated func compareCodeUnits(_ a: String, _ b: String) -> Int {
   var ia = a.utf16.makeIterator()
   var ib = b.utf16.makeIterator()
@@ -96,7 +96,7 @@ func compareEntries(_ a: Entry, _ b: Entry) -> Int {
   return compareCodeUnits(a.name.lowercased(), b.name.lowercased())
 }
 
-/// 順序付きの辞書（Dart の Map は追加した順を保つ）。
+/// 順序付きの辞書（追加した順を保つ）。
 struct OrderedMap<K: Hashable, V> {
   private(set) var keys: [K] = []
   private var storage: [K: V] = [:]
@@ -143,7 +143,7 @@ struct OrderedMap<K: Hashable, V> {
   }
 }
 
-/// 左右の画面の共通部分。カーソル・マーク・読み込み。継承して使う（Dart の abstract class Pane）。
+/// 左右の画面の共通部分。カーソル・マーク・読み込み。継承して使う。
 class Pane {
   init(_ app: App) {
     self.app = app

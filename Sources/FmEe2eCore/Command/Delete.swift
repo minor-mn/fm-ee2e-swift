@@ -73,7 +73,7 @@ final class SshDelete: DeleteCommand {
   }
 }
 
-/// ゴミ箱へ移す（Google Drive のゴミ箱に入る）。
+/// ゴミ箱へ移す（Google Drive のゴミ箱に入る）。名前ファイルがあれば一緒に移す。
 final class DriveDelete: DeleteCommand {
   override var title: String { tr("delete.trash_title") }
 
@@ -86,7 +86,7 @@ final class DriveDelete: DeleteCommand {
   override func remove(_ c: CommandContext, _ targets: [Mark]) async throws {
     let pane = c.pane as! DrivePane
     for mark in targets {
-      try await moveToTrash(pane.pathOfMark(mark))
+      try await pane.trash(pane.pathOfMark(mark))
     }
   }
 }

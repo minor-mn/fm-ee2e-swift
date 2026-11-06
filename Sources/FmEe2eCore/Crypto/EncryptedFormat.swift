@@ -53,7 +53,7 @@ nonisolated struct EncryptedFormat: Sendable {
   }
 
   /// [read] から読んだ平文を暗号化して [write] に渡す。
-  /// [read] は最大で指定した長さを返し、終端でのみそれより短くなる（Dart 版の ChunkedReader.read と同じ）。
+  /// [read] は最大で指定した長さを返し、終端でのみそれより短くなる。
   func encrypt(read: (Int) throws -> Data, write: (Data) throws -> Void, key: Data) throws {
     try encrypt(read: read, write: write, key: key, salt: randomBytes(32))
   }
@@ -161,7 +161,7 @@ nonisolated struct EncryptedFormat: Sendable {
     }
   }
 
-  /// [from] を読み、[to] を作り直して書く。途中で失敗したときの [to] はそのまま残す（Dart 版と同じ）。
+  /// [from] を読み、[to] を作り直して書く。途中で失敗したときの [to] はそのまま残す。
   private static func pipe(
     from: String,
     to: String,

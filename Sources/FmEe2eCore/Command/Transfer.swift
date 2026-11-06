@@ -127,8 +127,7 @@ final class DriveUpload: DriveTransferCommand {
         if let existing = existing as? LocalDir {
           dir = existing.directory
         } else {
-          dir = try await drive.encryptedPath(dest, name, isFolder: true)
-          try createDirectory(dir)
+          dir = try await drive.place(dest, name, isFolder: true) { try createDirectory($0) }
         }
         for path in try listDirectory(from) {
           if let source = localSourceOf(path, statPath(path)) {
@@ -150,11 +149,10 @@ final class DriveUpload: DriveTransferCommand {
         }
       }
       update(name)
-      let to = try await drive.encryptedPath(dest, target, isFolder: false)
-      try await drive.encryptFile(from, to)
+      let to = try await drive.place(dest, target, isFolder: false) { try await drive.encryptFile(from, $0) }
       // 新しいものを置き終えてから、上書きされる側をゴミ箱に移す。
       if let replaced {
-        try await moveToTrash(replaced)
+        try await drive.trash(replaced)
       }
       // 手元には残さない（Drive に上がり終えたら外す）。
       drive.evictLater([to])
@@ -735,14 +733,14 @@ final class RightSshScp: ScpCommand {
   }
 }
 
-// ---- ファイルシステムの小さな操作（Dart の Directory の代わり） ----
+// ---- ファイルシステムの小さな操作 ----
 
-/// [path] がフォルダーか（シンボリックリンクはたどる。Dart の Directory.exists と同じ）。
+/// [path] がフォルダーか（シンボリックリンクはたどる）。
 private func directoryExists(_ path: String) -> Bool {
   statPath(path).type == .directory
 }
 
-/// フォルダーを作る。すでにフォルダーがあれば何もしない（Dart の Directory.create と同じ）。
+/// フォルダーを作る。すでにフォルダーがあれば何もしない。
 private func createDirectory(_ path: String) throws {
   if mkdir(path, 0o777) != 0 {
     let code = errno

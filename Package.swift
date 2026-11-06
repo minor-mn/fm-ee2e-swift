@@ -2,7 +2,7 @@
 import PackageDescription
 
 let settings: [SwiftSetting] = [
-  // Dart 版と同じく、すべて1つのスレッド（メインアクター）で動かす。
+  // すべて1つのスレッド（メインアクター）で動かす。
   .defaultIsolation(MainActor.self)
 ]
 

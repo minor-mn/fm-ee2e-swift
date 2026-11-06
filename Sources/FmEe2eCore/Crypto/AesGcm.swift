@@ -16,11 +16,11 @@ nonisolated struct AuthenticationException: Error, CustomStringConvertible {
   var description: String { "AuthenticationException" }
 }
 
-/// CryptoKit の AES-GCM（Dart 版の OpenSSL の FFI の代わり）。
+/// CryptoKit の AES-GCM。
 nonisolated struct CryptoKitAead: Aead {
   static let tagLength = 16
 
-  /// Dart 版の OpenSslAead.load() と同じ形。CryptoKit は常に使えるので失敗しない。
+  /// CryptoKit は常に使えるので失敗しない。
   static func load() -> CryptoKitAead { CryptoKitAead() }
 
   func seal(_ key: Data, _ nonce: Data, _ plain: Data, _ aad: Data) throws -> Data {

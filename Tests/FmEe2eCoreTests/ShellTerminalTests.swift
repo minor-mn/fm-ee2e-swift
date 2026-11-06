@@ -297,7 +297,7 @@ struct ShellTerminalTests {
     let t = ShellTerminal(5, 2)
     t.write("\u{1b}[9223372036854775807C\u{1b}[-9223372036854775807A\u{1b}[-5@\u{1b}[-5P\u{1b}[-3S")
     #expect(t.x == 4)
-    // Int に収まらない値は（Dart の int.tryParse と同じく）省略として扱う。
+    // Int に収まらない値は省略として扱う。
     t.write("\u{1b}[99999999999999999999999D")
     #expect(t.x == 3)
   }

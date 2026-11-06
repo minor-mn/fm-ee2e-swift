@@ -39,6 +39,8 @@ final class ContainerSettingsDialog: Modal {
     return row == Self.rosettaRow ? nil : fields[row < Self.rosettaRow ? row : row - 1]
   }
 
+  override var focusedField: InputField? { field(row, column) }
+
   private func keepEmptyMount() {
     if mounts.last.map({ $0.contains { !$0.value.isEmpty } }) ?? true {
       mounts.append([InputField(), InputField(), InputField()])

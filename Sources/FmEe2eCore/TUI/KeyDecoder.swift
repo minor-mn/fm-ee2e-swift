@@ -113,8 +113,11 @@ final class KeyDecoder {
         inPaste = true
         return seq.count
       }
-      if let key = Self.csiKeys[String(decoding: seq, as: UTF8.self)] {
+      let text = String(decoding: seq, as: UTF8.self)
+      if let key = Self.csiKeys[text] {
         keyEvents.add(.named(key))
+      } else if let key = Self.shiftCsiKeys[text] {
+        keyEvents.add(.named(key, shift: true))
       }
       return seq.count
     }
@@ -163,6 +166,16 @@ final class KeyDecoder {
     "\u{1b}[12~": "f2",
     "\u{1b}[13~": "f3",
     "\u{1b}[14~": "f4",
+  ]
+
+  /// Shift つきの矢印・Home・End（xterm の修飾キーつきの形。2 が Shift）。
+  private static let shiftCsiKeys: [String: String] = [
+    "\u{1b}[1;2A": "up",
+    "\u{1b}[1;2B": "down",
+    "\u{1b}[1;2C": "right",
+    "\u{1b}[1;2D": "left",
+    "\u{1b}[1;2H": "home",
+    "\u{1b}[1;2F": "end",
   ]
 
   private static let ss3Keys: [String: String] = [

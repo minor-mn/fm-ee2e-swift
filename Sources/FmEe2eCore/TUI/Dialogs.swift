@@ -106,6 +106,8 @@ final class ConfirmDialog: Modal {
 }
 
 /// 1行の入力欄。[selectStem] なら拡張子の前までを選択した状態で始め、入力で置き換える。
+/// Shift+←→・Home・End で選択を広げ縮め、⌘A ですべてを選ぶ。選択は入力・削除・貼り付けで置き換わり、⌘C でコピーできる。
+/// 欄に収まらない文字列は、カーソルが見えるように左右に流して描く。
 final class InputField {
   init(initial: String = "", masked: Bool = false, allowNewlines: Bool = false, selectStem: Bool = false) {
     self.masked = masked
@@ -115,11 +117,9 @@ final class InputField {
     cursor = cellList.count
     if selectStem {
       if let dot = initial.lastIndex(of: "."), dot != initial.startIndex {
-        selectionEnd = cells(String(initial[..<dot])).count
-      } else {
-        selectionEnd = cellList.count
+        cursor = cells(String(initial[..<dot])).count
       }
-      cursor = selectionEnd!
+      anchor = cursor > 0 ? 0 : nil
     }
   }
 
@@ -127,11 +127,26 @@ final class InputField {
   let allowNewlines: Bool
   private let original: String
   private var cellList: [String]
-  private var cursor: Int
+  private(set) var cursor: Int
 
-  /// 先頭から [selectionEnd] までが選択中。
-  private var selectionEnd: Int?
+  /// 選択の起点。[anchor] と [cursor] の間が選択中。選択がなければ nil。
+  private var anchor: Int?
   private var edited = false
+
+  /// 描き始める位置（左に流した文字数）。
+  private var scroll = 0
+
+  /// 選択している範囲。なければ nil。
+  var selection: Range<Int>? {
+    guard let anchor, anchor != cursor else { return nil }
+    return min(anchor, cursor)..<max(anchor, cursor)
+  }
+
+  /// 選択している文字列（⌘C）。伏せ字の欄では nil。
+  var selectedText: String? {
+    guard !masked, let selection else { return nil }
+    return cellList[selection].joined()
+  }
 
   /// 編集していなければ元の文字列（macOSのNFDの名前を保つ）。
   var value: String { edited ? cellList.joined() : original }
@@ -149,16 +164,40 @@ final class InputField {
     let head = cells(before)
     cellList = head + cells(after)
     cursor = head.count
-    selectionEnd = nil
+    anchor = nil
     edited = true
   }
 
-  private func deleteSelection() {
-    if let end = selectionEnd {
-      cellList.removeSubrange(0..<end)
-      cursor = 0
-      selectionEnd = nil
+  /// すべてを選ぶ（⌘A）。
+  func selectAll() {
+    anchor = 0
+    cursor = cellList.count
+  }
+
+  /// 選択を消す。消したら true。
+  @discardableResult
+  private func deleteSelection() -> Bool {
+    guard let selection else {
+      anchor = nil
+      return false
     }
+    cellList.removeSubrange(selection)
+    cursor = selection.lowerBound
+    anchor = nil
+    edited = true
+    return true
+  }
+
+  /// カーソルを [to] へ動かす。[extend] なら選択を広げ縮め、でなければ選択をやめる。
+  private func move(to: Int, extend: Bool) {
+    if extend {
+      if anchor == nil {
+        anchor = cursor
+      }
+    } else {
+      anchor = nil
+    }
+    cursor = min(max(to, 0), cellList.count)
   }
 
   private func insert(_ text: String) {
@@ -189,40 +228,43 @@ final class InputField {
     }
     switch key.name == "ctrl" ? "ctrl+\(key.ctrl!)" : key.name {
     case "left", "ctrl+b":
-      selectionEnd = nil
-      cursor = max(0, cursor - 1)
+      // 選択中に Shift なしで押したら、選択の左端へ（macOS と同じ）。
+      if !key.shift, let selection {
+        move(to: selection.lowerBound, extend: false)
+      } else {
+        move(to: cursor - 1, extend: key.shift)
+      }
     case "right", "ctrl+f":
-      selectionEnd = nil
-      cursor = min(cellList.count, cursor + 1)
+      if !key.shift, let selection {
+        move(to: selection.upperBound, extend: false)
+      } else {
+        move(to: cursor + 1, extend: key.shift)
+      }
     case "home", "ctrl+a":
-      selectionEnd = nil
-      cursor = 0
+      move(to: 0, extend: key.shift)
     case "end", "ctrl+e":
-      selectionEnd = nil
-      cursor = cellList.count
+      move(to: cellList.count, extend: key.shift)
+    case "selectAll":
+      selectAll()
     case "backspace", "ctrl+h":
       edited = true
-      if selectionEnd != nil {
-        deleteSelection()
-      } else if cursor > 0 {
+      if !deleteSelection() && cursor > 0 {
         cursor -= 1
         cellList.remove(at: cursor)
       }
     case "delete", "ctrl+d":
       edited = true
-      if selectionEnd != nil {
-        deleteSelection()
-      } else if cursor < cellList.count {
+      if !deleteSelection() && cursor < cellList.count {
         cellList.remove(at: cursor)
       }
     case "ctrl+u":
       edited = true
-      selectionEnd = nil
+      anchor = nil
       cellList.removeSubrange(0..<cursor)
       cursor = 0
     case "ctrl+k":
       edited = true
-      selectionEnd = nil
+      anchor = nil
       cellList.removeSubrange(cursor..<cellList.count)
     default:
       return false
@@ -237,22 +279,33 @@ final class InputField {
     let style = Style(bg: Palette.background)
     screen.fill(x, y, width, 1, style)
     let shown = cellList.map(display)
-    // カーソルが見える範囲だけを描く。
-    var start = 0
-    while start < cursor && textWidth(shown[start..<cursor].joined()) > width - 1 {
-      start += 1
-    }
+    scrollToCursor(shown, width)
+    let selection = selection
     var col = x
-    for i in start..<shown.count {
+    for i in scroll..<shown.count {
       let w = textWidth(shown[i])
       if col + w > x + width {
         break
       }
-      let selected = selectionEnd != nil && i < selectionEnd!
+      let selected = selection?.contains(i) ?? false
       col += screen.text(col, y, shown[i], selected ? style.copyWith(bg: Palette.selected) : style)
     }
     if focused {
-      screen.cursor = (x + textWidth(shown[start..<cursor].joined()), y)
+      screen.cursor = (x + textWidth(shown[scroll..<cursor].joined()), y)
+    }
+  }
+
+  /// カーソルが幅 [width] の欄に見えるように、描き始める位置 [scroll] を必要なだけ動かす。
+  /// 右に余白ができたら（後ろを消したときなど）、左に戻して埋める。
+  private func scrollToCursor(_ shown: [String], _ width: Int) {
+    // カーソルの分として1桁空ける。
+    let room = max(width - 1, 1)
+    scroll = min(scroll, cursor, shown.count)
+    while scroll < cursor && textWidth(shown[scroll..<cursor].joined()) > room {
+      scroll += 1
+    }
+    while scroll > 0 && textWidth(shown[(scroll - 1)...].joined()) <= room {
+      scroll -= 1
     }
   }
 }
@@ -298,6 +351,8 @@ final class InputDialog: Modal {
 
   let message: String?
   let field: InputField
+
+  override var focusedField: InputField? { field }
 
   /// ↑↓ でたどる入力の履歴（古い順）。readline の history-search-backward / forward と同じく、
   /// カーソルより前の文字列で始まるものだけをたどる。
@@ -464,6 +519,8 @@ final class ExecDialog: Modal {
 
   /// 0: 入力欄、1: 実行、2: キャンセル。
   private var focus = 0
+
+  override var focusedField: InputField? { focus == 0 ? field : nil }
 
   private static var buttons: [String] { ["exec", tr("dialogs.cancel")] }
 

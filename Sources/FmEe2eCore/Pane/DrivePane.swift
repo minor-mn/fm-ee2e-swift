@@ -25,7 +25,7 @@ final class DrivePane: PathPane {
   private var dir = ""
 
   /// 鍵がそろったときの、名前とファイルの暗号。
-  var names: NameCipher?
+  var names: DriveNames?
   var format: EncryptedFormat?
   var key: Data?
 
@@ -41,6 +41,7 @@ final class DrivePane: PathPane {
         .edit: DriveEdit(),
         .delete: DriveDelete(),
         .mkdir: DriveMkdir(),
+        .touch: DriveTouch(),
         .paste: DrivePaste(),
         // Google Drive のタブで G・F12 は、左のローカルへの復号してのダウンロード。
         .transfer: DriveDownload(),
@@ -131,7 +132,7 @@ final class DrivePane: PathPane {
       return
     }
     key = loaded
-    names = NameCipher(loaded)
+    names = DriveNames(NameCipher(loaded))
     root = found
     dir = found
     crumbs = [Self.rootFolderName]
@@ -221,16 +222,33 @@ final class DrivePane: PathPane {
     let root = root!
     var result = [Self.rootFolderName]
     if path != root {
+      var parent = root
       for segment in p.split(p.relative(path, from: root)) {
-        result.append(await shownName(segment, isFolder: true))
+        result.append(names!.shown(parent, segment, isFolder: true))
+        parent = p.join(parent, segment)
       }
     }
     return result
   }
 
-  /// 一覧に出す名前。このアプリ・この鍵で暗号化した名前でなければ、そのまま。
-  private func shownName(_ name: String, isFolder: Bool) async -> String {
-    names!.decrypt(name, isFolder: isFolder) ?? name
+  /// フォルダー [dir] の中の、名前ファイルを除いた項目と、その一覧に出す名前（復号したもの）。
+  /// [showHidden] でなければ、「.」で始まる名前（Drive 上の名前で）も除く。
+  private func listItems(_ dir: String, showHidden: Bool) throws -> [(name: String, path: String, stat: FileStat, source: LocalSource)] {
+    let paths = try listDirectory(dir)
+    let siblings = Set(paths.map { p.basename($0) })
+    var items: [(name: String, path: String, stat: FileStat, source: LocalSource)] = []
+    for path in paths {
+      let raw = p.basename(path)
+      if DriveNames.isNameFile(raw) || (!showHidden && raw.hasPrefix(".")) {
+        continue
+      }
+      let stat = statPath(path)
+      guard let source = localSourceOf(path, stat) else {
+        continue
+      }
+      items.append((names!.shown(dir, raw, isFolder: source is LocalDir, siblings: siblings), path, stat, source))
+    }
+    return items
   }
 
   override var accent: Rgb { colors.accent ?? colors.green }
@@ -261,25 +279,13 @@ final class DrivePane: PathPane {
       return []
     }
     Task { await evictPending() }
-    var entries: [Entry] = []
-    for path in try listDirectory(dir) {
-      let name = p.basename(path)
-      if !showHidden && name.hasPrefix(".") {
-        continue
-      }
-      let stat = statPath(path)
-      guard let source = localSourceOf(path, stat) else {
-        continue
-      }
-      let isDir = source is LocalDir
-      entries.append(
-        Entry(
-          name: await shownName(name, isFolder: isDir),
-          isDir: isDir,
-          size: (source as? LocalFile)?.size,
-          modified: stat.modified,
-          data: source
-        )
+    let entries = try listItems(dir, showHidden: showHidden).map { item in
+      Entry(
+        name: item.name,
+        isDir: item.source is LocalDir,
+        size: (item.source as? LocalFile)?.size,
+        modified: item.stat.modified,
+        data: item.source
       )
     }
     return entries.sorted { compareEntries($0, $1) < 0 }
@@ -315,21 +321,33 @@ final class DrivePane: PathPane {
   /// [dir] の中の項目（隠しファイルを除く）を、一覧に出す名前（復号したもの）で引けるようにしたもの。
   func itemsIn(_ dir: String) async throws -> [String: LocalSource] {
     var items: [String: LocalSource] = [:]
-    for path in try listDirectory(dir) {
-      let name = p.basename(path)
-      if name.hasPrefix(".") {
-        continue
-      }
-      if let source = localSourceOf(path, statPath(path)) {
-        items[await shownName(name, isFolder: source is LocalDir)] = source
-      }
+    for item in try listItems(dir, showHidden: false) {
+      items[item.name] = item.source
     }
     return items
   }
 
-  /// [dir] の中に [name] を置くときのパス（名前を暗号化したもの）。
-  func encryptedPath(_ dir: String, _ name: String, isFolder: Bool) async throws -> String {
-    p.join(dir, names!.encrypt(name, isFolder: isFolder))
+  /// [dir] の中に [name] を置く（名前を暗号化する）。[put] で、渡したパスに本体を置く。置いたパスを返す。
+  /// 暗号化した名前が長すぎるときは、名前ファイルも置く（[DriveNames]）。
+  @discardableResult
+  func place(_ dir: String, _ name: String, isFolder: Bool, _ put: (String) async throws -> Void) async throws -> String {
+    try await names!.place(dir, name, isFolder: isFolder, put)
+  }
+
+  /// Drive の [path] をゴミ箱に移す。名前ファイルがあれば一緒に移す。
+  func trash(_ path: String) async throws {
+    let nameFile = DriveNames.existingNameFile(of: path)
+    try await moveToTrash(path)
+    if let nameFile {
+      try await moveToTrash(nameFile)
+    }
+  }
+
+  /// [path] にあった本体を別の名前・場所に置き直したあと、元の名前ファイルを消す（新しい名前は置き直したほうにある）。
+  func removeNameFile(of path: String) {
+    if let nameFile = DriveNames.existingNameFile(of: path) {
+      try? FileManager.default.removeItem(atPath: nameFile)
+    }
   }
 
   /// アップロードしたが、まだ手元のデータを外せていないファイル。Drive に上がり終える前は外せないので、

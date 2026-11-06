@@ -73,8 +73,8 @@ nonisolated struct NameCipher: Sendable {
   }
 }
 
-/// Dart の base64.decode と同じく Base64 を読む。標準・URL 用のどちらの文字も受け付け、余りのビットが0でないものは不正とする。
-/// [requirePadding] が false なら、パディングのないものも受け付ける（Dart の base64Url.normalize を通してから読むのと同じ）。
+/// Base64 を読む。標準・URL 用のどちらの文字も受け付け、余りのビットが0でないものは不正とする。
+/// [requirePadding] が false なら、パディングのないものも受け付ける。
 /// 読めなければ nil。
 nonisolated func decodeBase64(_ text: String, requirePadding: Bool) -> Data? {
   var values: [UInt8] = []

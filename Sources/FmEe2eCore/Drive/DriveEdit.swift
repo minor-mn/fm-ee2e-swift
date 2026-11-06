@@ -120,11 +120,10 @@ final class DriveEditSession {
       }
     }
     try await app.withProgress(tr("drive_edit.encrypting", ["name": target])) {
-      let to = try await drive.encryptedPath(parent, target, isFolder: false)
-      try await drive.encryptFile(plainPath, to)
+      let to = try await drive.place(parent, target, isFolder: false) { try await drive.encryptFile(plainPath, $0) }
       // 新しいものを置き終えてから、上書きされる側をゴミ箱に移す。
       if let replaced {
-        try await moveToTrash(replaced)
+        try await drive.trash(replaced)
       }
       drive.evictLater([to])
     }

@@ -488,7 +488,7 @@ struct AppConfig {
   }
 }
 
-/// 設定ファイルの形式の誤り（Dart の FormatException）。
+/// 設定ファイルの形式の誤り。
 struct ConfigFormatError: Error, CustomStringConvertible {
   init(_ message: String) {
     self.message = message

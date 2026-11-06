@@ -58,6 +58,7 @@ final class SshRename: RenameCommand {
 }
 
 /// 名前を暗号化し直して（ファイルは拡張子より前、フォルダーは全体）、暗号化した名前どうしで変える。中身はそのまま。
+/// 名前ファイルがあれば、新しい名前の側に置き直す。
 final class DriveRename: RenameCommand {
   /// 同じフォルダーの、復号した名前。
   override func siblingNames(_ c: CommandContext, _ target: Mark) async throws -> Set<String> {
@@ -66,9 +67,8 @@ final class DriveRename: RenameCommand {
 
   override func rename(_ c: CommandContext, _ target: Mark, _ name: String) async throws {
     let pane = c.pane as! DrivePane
-    try await movePath(
-      pane.pathOfMark(target),
-      try await pane.encryptedPath(target.parent, name, isFolder: target.entry.isDir)
-    )
+    let from = pane.pathOfMark(target)
+    try await pane.place(target.parent, name, isFolder: target.entry.isDir) { try await movePath(from, $0) }
+    pane.removeNameFile(of: from)
   }
 }
