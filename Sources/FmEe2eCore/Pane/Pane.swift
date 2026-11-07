@@ -71,7 +71,7 @@ struct Mark {
   let parent: String
 }
 
-/// Dart の String.compareTo と同じく、UTF-16 の符号単位で比べる。
+/// UTF-16 の符号単位で比べる。
 nonisolated func compareCodeUnits(_ a: String, _ b: String) -> Int {
   var ia = a.utf16.makeIterator()
   var ib = b.utf16.makeIterator()
@@ -96,7 +96,7 @@ func compareEntries(_ a: Entry, _ b: Entry) -> Int {
   return compareCodeUnits(a.name.lowercased(), b.name.lowercased())
 }
 
-/// 順序付きの辞書（Dart の Map は追加した順を保つ）。
+/// 順序付きの辞書（追加した順を保つ）。
 struct OrderedMap<K: Hashable, V> {
   private(set) var keys: [K] = []
   private var storage: [K: V] = [:]
@@ -143,7 +143,7 @@ struct OrderedMap<K: Hashable, V> {
   }
 }
 
-/// 左右の画面の共通部分。カーソル・マーク・読み込み。継承して使う（Dart の abstract class Pane）。
+/// 左右の画面の共通部分。カーソル・マーク・読み込み。継承して使う。
 class Pane {
   init(_ app: App) {
     self.app = app
@@ -416,6 +416,15 @@ class Pane {
       drawRow(screen, entry, x, y + i, width, style, marked: isMarked(entry))
       i += 1
     }
+    if dragsFiles {
+      let first = scroll
+      screen.filesAt = { [weak self] cx, cy in
+        guard let self, cx >= x, cx < x + width, cy >= y, cy < y + rows, first + cy - y < entries.count else {
+          return nil
+        }
+        return dragPaths(entries[first + cy - y])
+      }
+    }
     if entries.count == 1 && entries[0].isParent && rows > 1 {
       screen.text(x + 2, y + 1, tr("pane.empty_folder"), bg.copyWith(fg: Palette.muted))
     }
@@ -499,6 +508,14 @@ class Pane {
 
   /// C・M（F2・F3）で選べるか（[makeClip] を持ち、読むだけの場所でない）。
   var canClip: Bool { false }
+
+  // ---- ほかのアプリとのファイルの受け渡し（GUI 版のドラッグ&ドロップ） ----
+
+  /// 一覧の行を CapsLock 中のドラッグでほかのアプリに渡せ、ほかのアプリからのドロップを受け取るか。
+  var dragsFiles: Bool { false }
+
+  /// [entry] の行を掴んだときに渡すパス。マークした行ならマークした全件、そうでなければその行だけ。渡せなければ nil。
+  func dragPaths(_ entry: Entry) -> [String]? { nil }
 }
 
 /// パスで扱える窓（ローカルと SSH の接続先）の共通部分。ファイルの操作は各タブのコマンドが行う。

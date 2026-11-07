@@ -1,19 +1,21 @@
 /// 右の窓に Google Drive の代わりに出す git status（見るだけ）。左で開いているフォルダーのリポジトリを見る。
 /// 左がローカルならこの Mac の git、SSH なら接続先の git を使う。
+/// どちらも、見つからなくてもずっと使えないことにはせず、フォルダー・接続先を移るたびに探し直す
+/// （Container で、ホストにバインドしたフォルダーに移ると、この Mac の git で見られるようになる、など）。
 final class GitPane: Pane {
-  init(_ app: App, _ localGit: Git) {
+  init(_ app: App, _ localGit: Git?) {
     self.localGit = localGit
     super.init(app)
   }
 
-  /// この Mac の git。
-  let localGit: Git
+  /// この Mac の git。見つかっていなければ nil（ローカルのフォルダーを見るたびに探し直す）。
+  private(set) var localGit: Git?
 
-  /// 見ているリポジトリの git。読み込む前と、接続先に git がないときは nil。
+  /// 見ているリポジトリの git。読み込む前と、git がないときは nil。
   private var currentGit: Git?
 
-  /// 見ているリポジトリの git（[ready] のときだけ使う）。
-  var git: Git { currentGit ?? localGit }
+  /// 見ているリポジトリの git（[ready] のときだけ使う。そのときは必ずある）。
+  var git: Git { currentGit ?? localGit! }
 
   /// 左の SSH の接続。左がローカルなら nil。
   private(set) var ssh: Ssh?
@@ -74,6 +76,10 @@ final class GitPane: Pane {
       if let remote {
         git = try await Git.overSsh(remote)
       } else {
+        // 起動したときになくても、あとで入れたかもしれないので探し直す。
+        if localGit == nil {
+          localGit = try await Git.locate()
+        }
         git = localGit
       }
       if moved() {
@@ -82,7 +88,7 @@ final class GitPane: Pane {
       if git == nil {
         root = nil
         repositoryText = nil
-        message = [tr("git_pane.no_git")]
+        message = [tr(remote == nil ? "git_pane.no_local_git" : "git_pane.no_git")]
         return []
       }
       currentGit = git

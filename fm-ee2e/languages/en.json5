@@ -62,14 +62,13 @@
         "               (Before connecting, SSH lists the Hosts in ~/.ssh/config. Enter connects)",
         "Shift+Tab      Switch the left pane: Local / SSH / Container",
         "               (When the left is SSH, the right SSH connects from the left host, using its ~/.ssh/config)",
-        "               (When the left is SSH, the right is Local / git status / SSH / Container.",
-        "                git status shows the host’s repository. If the right is Local, G transfers by SCP)",
+        "               (When the left is SSH, git status shows the host’s repository. If the right is Local, G transfers by SCP)",
         "SSH            List, mark, copy, move and delete files on the host",
         "               G/F12: Transfer to/from local  E/F8: Edit on the host",
         "               S: Run a command on the host",
         "Container      Enter: connect, confirming startup if stopped. G/F12: copy to/from the other local pane",
         "               In the list, Space: mark / C: Create / U: Up / S: Stop / D: Delete / F: choose Compose files for the list",
-        "               O: return to the list (keep running). With Container on the left, the right is Local / Container",
+        "               O: return to the list (keep running)",
         "Enter          Folder: open it",
         "               .zip .tar.gz .tar.xz: show the contents like a folder (read-only)",
         "               Drive file: decrypt into a temporary folder",
@@ -90,6 +89,9 @@
         "               (When the right is git status, Git commands. Pressed on the left, offers",
         "                git add / restore / rm for the left files, depending on their state)",
         "               If the cursor and marks give several targets, marks only; if one, the cursor",
+        "               G transfers run in the background. Starting one switches the destination side to the Transfers tab",
+        "               In the Transfers tab, G / F12 offers cancel / retry for the transfer or item at the cursor (the marks, if any), and cancel running to stop the whole running transfer",
+        "               In the Transfers tab, Enter goes back to the tab shown before (transfers keep running)",
         "D / Del        Delete (move to the Trash; SSH deletes with rm)",
         "A              Change permissions",
         "S              Shell (enter a command and run it in a frame; Enter returns when done)",
@@ -101,7 +103,7 @@
         "               SSH: only formats the host’s zip, tar, gzip, xz can create)",
         "U              Extract the .zip .tar.gz .tar.xz at the cursor into the current folder",
         "               (SSH uses tar, bsdtar or unzip on the host; can’t extract without them)",
-        "Ctrl+L         Go to a directory",
+        "Ctrl+L         Go to a directory (↑↓ for the directories you went to with Ctrl+L)",
         "~              Go home",
         ".              Show hidden files",
         "V              Preview images and videos in the other pane (on/off; SSH: images only)",
@@ -182,13 +184,10 @@
     // Google Drive
     drive_unavailable: "Google Drive is unavailable.",
     drive_loading: "Loading the Google Drive folder.",
-    in_progress: "{title} in progress…",
-    in_progress_item: "{title} in progress… {name}",
     upload: "Upload",
     drive_upload_confirm: "Encrypt {label} and upload to {location} on Google Drive.",
     download: "Download",
     drive_download_confirm: "Decrypt {label} and download to {dir}.",
-    in_progress_count: "{title} in progress ({index}/{total}) {name}",
     // iCloud Drive
     icloud_unavailable: "iCloud Drive is unavailable.",
     icloud_loading: "Loading the iCloud Drive folder.",
@@ -205,6 +204,19 @@
     staging_remove_failed: "Can’t delete the temporary folder {staging}: {error}",
     copy_right: "Copy to right",
     copy_left: "Copy to left",
+  },
+  // Transfers tab (the list of G / F12 transfers)
+  transfers: {
+    title: "Transfers",
+    summary: "Running {running} · waiting {waiting} · done {done} · failed {failed} · cancelled {cancelled}",
+    failed_count: "{count} failed",
+    job: "{title} → {dest}",
+    preparing: "Preparing the transfer…",
+    progress: "{title} ({index}/{total}) {name}",
+    progress_waiting: "  ({count} more waiting)",
+    failed_status: "{count} items failed to transfer (see the Transfers tab)",
+    done_status: "Finished: {title}",
+    cancelled_status: "Cancelled: {title}",
   },
   // Common dialog text
   dialogs: {
@@ -251,6 +263,7 @@
     compress_title: "Compress",
     compress_message: "Compress {count} items into {place}. File name",
     compressing: "Compressing…",
+    compressing_count: "Compressing… ({done}/{total}) {name}",
     ssh_unavailable: "{host} has neither zip nor tar (gzip, xz), so it can’t compress.",
     reading: "Reading “{name}”…",
     extract_title: "Extract",
@@ -262,6 +275,7 @@
     overwrite: "Overwrite",
     keep_existing: "Keep existing files",
     extracting: "Extracting “{name}”…",
+    extracting_count: "Extracting “{archive}”… ({done}/{total}) {name}",
   },
   // Delete
   delete: {
@@ -328,6 +342,7 @@
     not_found: "No such directory: {path}",
     local_prompt: "Path (~ is home)",
     ssh_prompt: "Path on the host (~ is home)",
+    history_save_failed: "Can’t save the folder history: {error}",
   },
   // Common command text
   command: {
@@ -785,6 +800,7 @@
     // Git pane title and hints
     loading: "Loading Git…",
     no_git: "The host has no git.",
+    no_local_git: "No working Git is installed.",
     not_repository: "This folder isn’t under git.",
   },
 }

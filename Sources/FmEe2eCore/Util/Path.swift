@@ -1,6 +1,6 @@
 import Foundation
 
-/// パスの操作（Dart の package:path の POSIX 版と同じ動き）。
+/// パスの操作（POSIX）。
 /// [current] は相対パスの基準（nil ならプロセスの作業フォルダー）。
 nonisolated struct PathContext: Sendable {
   init(current: String? = nil) {
@@ -158,5 +158,5 @@ nonisolated struct PathContext: Sendable {
   }
 }
 
-/// ローカルのパスの操作（Dart の `p.`）。
+/// ローカルのパスの操作。
 nonisolated let p = PathContext.local

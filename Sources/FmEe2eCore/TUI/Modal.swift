@@ -20,7 +20,7 @@ func paneColumns(_ width: Int, left: Bool) -> (x: Int, width: Int) {
 
 /// ダイアログや全画面の表示など、画面の上に重ねるものの共通部分。
 /// 枠・見出し・案内は [frame] に合わせてここで描き、本文だけを [drawBody] で描く。
-/// 継承して使う（Dart の abstract class Modal）。
+/// 継承して使う。
 class Modal: View {
   init(_ title: String, accent: Rgb = Palette.purple) {
     self.title = title
@@ -54,6 +54,9 @@ class Modal: View {
 
   /// 下に出すキーの案内。
   var hints: [(String, String)] { [] }
+
+  /// いまキーを受けている入力欄。入力欄のあるものが上書きする。
+  var focusedField: InputField? { nil }
 
   /// 案内の行の右端に出す状態と、その色（終了コードなど）。出さなければ nil。
   var status: (String, Rgb)? { nil }

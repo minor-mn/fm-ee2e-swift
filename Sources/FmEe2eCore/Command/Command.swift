@@ -180,6 +180,12 @@ protocol Workspace: AnyObject {
 
   /// [pane] の [entry] の Markdown を、反対側の窓にプレビュー（V）しているか。
   func previewsMarkdown(_ pane: Pane, _ entry: Entry) -> Bool
+
+  /// [job] を裏で送り始める（順番待ちに足す）。送り先の窓 [destination] を出している側を、転送タブに切り替える。
+  func startTransfer(_ job: TransferJob, to destination: Pane)
+
+  /// 選んでいる側の窓を、転送タブから、切り替わる前のタブに戻す（転送は裏で続く）。
+  func leaveTransfers()
 }
 
 /// C（複製）・M（移動）で選んだ項目。P で開いているフォルダーに貼り付ける。

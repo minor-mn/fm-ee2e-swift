@@ -16,21 +16,21 @@ private func unhex(_ text: String) -> Data {
   return data
 }
 
-/// 鍵 0x00..0x1f。以下の既知の値は Dart 版（fm-ee2e-tui の DartAead・NameCipher・KeyFile）で作ったもの。
+/// 鍵 0x00..0x1f。以下は、この鍵で暗号化した既知の値（Drive にある既存のデータを読めることの確かめ）。
 private let testKey = Data((0..<32).map { UInt8($0) })
 
 private func plainBytes(_ length: Int) -> Data { Data((0..<length).map { UInt8(($0 * 7 + 3) & 0xff) }) }
 
-/// Dart 版で chunkSize 16 で暗号化したもの（平文の長さ → 暗号化ファイル）。
-private let dartFiles: [(Int, String)] = [
+/// chunkSize 16 で暗号化したもの（平文の長さ → 暗号化ファイル）。
+private let knownFiles: [(Int, String)] = [
   (0, "464d45453245010051d7097479f797ba0000001076595a8c612781deb46480d0e8b4ae3ebe4da0589262489df15330eee498ab4fa6d49c1ab481c882079a4a28e3259121"),
   (16, "464d45453245010051d7097479f797ba0000001012be085aa3490e76bb6eb7a0cff38ca84eef1fef5546bcc8ffec849d341673ba884e771405c53300ecd9dee7084711b03c42661d03fc52fc8f03f7b478ed23ec"),
   (32, "464d45453245010051d7097479f797ba00000010cb5f292aa7976dbfc25885e9b44ce3bebd667e4d97fc93a0838c2e7a9a18343a3441afa4efd11b10575184c4243dea461fcda9fb92d48fff535f90590ec05435b464cd4797dd7e6e91c21613fac10e65d1d8340e7f55cf19815b8d2060e1c7a9"),
   (40, "464d45453245010051d7097479f797ba000000109208c6e00b513952a0a927078d19d4def811dae5c112a270b1f6c0e4c0c2d8a04bf8a51770ce5d7bedcf740527dce3d3390d166a5264a5d2e70b05f47f7dfc92e5db498a751ad03ace234bffc2ba657b308fa960db0593e8749e348b890c50490d2c3c3d860feb068f8d63e2bbe59a37ea13adceec5b6ad7"),
 ]
 
-/// Dart 版で暗号化した名前（平文、フォルダーか、暗号化した名前）。
-private let dartNames: [(String, Bool, String)] = [
+/// 暗号化した名前（平文、フォルダーか、暗号化した名前）。
+private let knownNames: [(String, Bool, String)] = [
   ("レポート.pdf", false, "Aa56Gz2liBrx-VPAFxVsoqgNHU8ZEIqwER_0NUSKjbx8b1gml7oa7bo.pdf"),
   (".bashrc", false, "AcSbFC9UHOgrt-b5sfUS9WzmsZv250lutIaBDm7JLMnF-pS_"),
   ("archive.tar.gz", false, "Aekm97uhUVlkL4zUnAtY1BEWDYPzwvVDEZ4occGnr2PZRJCHZ7mpXg.gz"),
@@ -76,19 +76,19 @@ private func withTempDir<T>(_ body: (String) async throws -> T) async throws -> 
 @Suite struct EncryptedFormatTests {
   let format = EncryptedFormat(CryptoKitAead.load(), chunkSize: 16)
 
-  @Test func keyIdMatchesDart() {
+  @Test func keyIdMatchesKnownValue() {
     #expect(hex(EncryptedFormat.keyId(testKey)) == "51d7097479f797ba")
   }
 
-  @Test func decryptsDartFiles() throws {
-    for (length, encrypted) in dartFiles {
+  @Test func decryptsKnownFiles() throws {
+    for (length, encrypted) in knownFiles {
       // 読み出す側のチャンク長はヘッダーから取るので、既定のチャンク長の形式でも読める。
       #expect(try decrypt(EncryptedFormat(CryptoKitAead.load()), unhex(encrypted)) == plainBytes(length))
     }
   }
 
-  @Test func encryptsSameBytesAsDartForSameSalt() throws {
-    for (length, encrypted) in dartFiles {
+  @Test func encryptsSameBytesForSameSalt() throws {
+    for (length, encrypted) in knownFiles {
       let expected = unhex(encrypted)
       let salt = expected.subdata(in: 20..<52)
       #expect(try hex(encrypt(format, plainBytes(length), salt: salt)) == encrypted)
@@ -167,8 +167,8 @@ private func withTempDir<T>(_ body: (String) async throws -> T) async throws -> 
 @Suite struct NameCipherTests {
   let names = NameCipher(testKey)
 
-  @Test func decryptsDartNames() {
-    for (plain, isFolder, encrypted) in dartNames {
+  @Test func decryptsKnownNames() {
+    for (plain, isFolder, encrypted) in knownNames {
       #expect(names.decrypt(encrypted, isFolder: isFolder) == plain)
     }
   }
@@ -197,8 +197,8 @@ private func withTempDir<T>(_ body: (String) async throws -> T) async throws -> 
     #expect(names.decrypt("", isFolder: true) == nil)
   }
 
-  /// Dart の base64Url.normalize + decode / base64.decode と同じ結果になること（Dart で確かめた値）。
-  @Test func decodesBase64LikeDart() {
+  /// Base64 を、パディングなしも許す読み方と、パディング必須の読み方で読んだ結果。
+  @Test func decodesBase64() {
     let cases: [(String, [UInt8]?, [UInt8]?)] = [
       // (入力, パディングなしも許す, パディング必須)
       ("AQID", [1, 2, 3], [1, 2, 3]),
@@ -224,7 +224,7 @@ private func withTempDir<T>(_ body: (String) async throws -> T) async throws -> 
 }
 
 @Suite struct KeyFileTests {
-  @Test func encodesLikeDart() throws {
+  @Test func encodesAndDecodes() throws {
     let text = KeyFile.encode(testKey)
     #expect(text == "fm-ee2e-key-v1\nAAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8=\n")
     #expect(try KeyFile.decode(text) == testKey)

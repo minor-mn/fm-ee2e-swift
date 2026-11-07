@@ -56,6 +56,13 @@ final class GuiHost: Host, GridSizer {
 
   var inputFilter: (([UInt8]) -> [UInt8])?
 
+  var focusedField: (() -> InputField?)?
+
+  /// キーを打ってはいない操作（⌘A など）を、キーとして画面へ渡す。
+  func sendKey(_ key: Key) {
+    decoder.keys.add(key)
+  }
+
   /// 文字の大きさの倍率（⌘+・⌘-）。
   var zoom = 1.0 {
     didSet {

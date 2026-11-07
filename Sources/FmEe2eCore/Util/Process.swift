@@ -1,7 +1,7 @@
 import Darwin
 import Foundation
 
-/// 文言だけのエラー（Dart の StateError・FormatException などの代わり）。
+/// 文言だけのエラー。
 struct AppError: Error, CustomStringConvertible {
   init(_ message: String) {
     self.message = message
@@ -23,7 +23,7 @@ struct CommandFailed: Error, CustomStringConvertible {
   var description: String { message }
 }
 
-/// Dart の ProcessException に当たるもの。
+/// 外部コマンドを実行できなかったときのエラー。
 struct ProcessError: Error, CustomStringConvertible {
   init(_ executable: String, _ arguments: [String], _ message: String, _ errorCode: Int = 0) {
     self.executable = executable
@@ -57,7 +57,7 @@ nonisolated func exitStatusText(_ exitCode: Int) -> String { tr("process.exit_st
 
 /// 外部コマンドの結果。
 nonisolated struct ProcResult: Sendable {
-  /// シグナルで終わったときは、負のシグナル番号（Dart と同じ）。
+  /// シグナルで終わったときは、負のシグナル番号。
   let exitCode: Int
   let stdoutData: Data
   let stderrData: Data
@@ -67,7 +67,7 @@ nonisolated struct ProcResult: Sendable {
   var stderr: String { String(decoding: stderrData, as: UTF8.self) }
 }
 
-/// 実行ファイルを探す。「/」を含まなければ PATH から探す（Dart の Process.run と同じ）。
+/// 実行ファイルを探す。「/」を含まなければ PATH から探す。
 nonisolated func resolveExecutable(_ name: String) -> String {
   if name.contains("/") {
     return name
@@ -82,10 +82,10 @@ nonisolated func resolveExecutable(_ name: String) -> String {
   return name
 }
 
-/// 実行中の外部コマンド（Dart の Process.start の代わり）。
+/// 実行中の外部コマンド。
 /// 標準出力・標準エラー出力は [onStdout]・[onStderr] に、読めた順にメインスレッドで渡す。
 final class RunningProcess {
-  /// [environment] は今の環境変数に足す（Dart と同じ）。
+  /// [environment] は今の環境変数に足す。
   init(
     _ executable: String,
     _ arguments: [String],
@@ -229,7 +229,41 @@ final class RunningProcess {
   }
 }
 
-/// 外部コマンドを実行して、終わるまで待つ（Dart の Process.run の代わり）。
+/// [runProcess] と同じく実行して終わるまで待ち、標準エラー出力を1行読めるたびに [onStderrLine] に（メインスレッドで）渡す
+/// （tar -v の進み具合を出すときなど）。呼んだ Task が取り消されたら、コマンドを止める。
+@discardableResult
+func runProcess(
+  _ executable: String,
+  _ arguments: [String],
+  environment: [String: String]? = nil,
+  onStderrLine: @escaping (String) -> Void
+) async throws -> ProcResult {
+  let process = try RunningProcess(executable, arguments, environment: environment)
+  var out = Data()
+  var err = Data()
+  var pending = Data()
+  process.onStdout = { out.append($0) }
+  process.onStderr = { chunk in
+    err.append(chunk)
+    pending.append(chunk)
+    while let newline = pending.firstIndex(of: 0x0a) {
+      let line = String(decoding: pending[pending.startIndex..<newline], as: UTF8.self)
+      pending.removeSubrange(pending.startIndex...newline)
+      onStderrLine(line)
+    }
+  }
+  process.closeStdin()
+  let pid = process.pid
+  let code = await withTaskCancellationHandler {
+    await process.exitCode
+  } onCancel: {
+    Darwin.kill(pid, SIGTERM)
+  }
+  await process.waitForOutput()
+  return ProcResult(exitCode: code, stdoutData: out, stderrData: err)
+}
+
+/// 外部コマンドを実行して、終わるまで待つ。
 /// 起動できなければ [ProcessError] を投げる。[input] は標準入力に書いて閉じる。
 @discardableResult
 func runProcess(
@@ -254,7 +288,13 @@ func runProcess(
   } else {
     process.closeStdin()
   }
-  let code = await process.exitCode
+  // 呼んだ Task が取り消されたら（転送の中止など）、コマンドを止める。
+  let pid = process.pid
+  let code = await withTaskCancellationHandler {
+    await process.exitCode
+  } onCancel: {
+    Darwin.kill(pid, SIGTERM)
+  }
   await process.waitForOutput()
   return ProcResult(exitCode: code, stdoutData: out, stderrData: err)
 }

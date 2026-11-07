@@ -82,7 +82,7 @@ nonisolated func regexGroup(_ m: Regex<AnyRegexOutput>.Match, _ i: Int) -> Strin
   m.output[i].substring.map(String.init)
 }
 
-/// Dart の DateTime(year, month, day, hour, minute) と同じ、この Mac の時間帯の日時。
+/// この Mac の時間帯の、年・月・日・時・分の日時。
 nonisolated func localDateTime(_ year: Int, _ month: Int, _ day: Int, _ hour: Int = 0, _ minute: Int = 0) -> Date {
   var calendar = Calendar(identifier: .gregorian)
   calendar.timeZone = .current
@@ -156,7 +156,7 @@ private nonisolated func date(_ m: Regex<AnyRegexOutput>.Match, _ now: Date) -> 
 
 /// [dir] の直下の項目。中のファイルからしか分からないフォルダーも補う。
 nonisolated func archiveChildren(_ items: [ArchiveItem], _ dir: String) -> [ArchiveItem] {
-  // 書いた順に並べる（Dart の Map と同じ）。
+  // 書いた順に並べる。
   var order: [String] = []
   var children: [String: ArchiveItem] = [:]
   let prefix = dir.isEmpty ? "" : "\(dir)/"
@@ -181,15 +181,31 @@ nonisolated func archiveChildren(_ items: [ArchiveItem], _ dir: String) -> [Arch
   return order.map { children[$0]! }
 }
 
+/// 進み具合（[done] 件目 / 全 [total] 件、いま扱っている名前）。
+typealias ArchiveProgress = (_ done: Int, _ total: Int, _ name: String) -> Void
+
+/// tar -v の標準エラー出力から、進み具合の行（作るときは「a 名前」、展開するときは「x 名前」）を除いたもの（エラーの文）。
+private nonisolated func tarErrors(_ stderr: String) -> String {
+  stderr.components(separatedBy: "\n").filter { !$0.hasPrefix("a ") && !$0.hasPrefix("x ") }
+    .joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+}
+
 /// [archive] を丸ごと [dest] に展開する。[items] は [listArchive] の結果で、名前の文字コード（CP932 など）を合わせる。
-/// [keepExisting] なら、すでにあるファイルは上書きしない。
-func extractArchive(_ archive: String, _ items: [ArchiveItem], _ dest: String, keepExisting: Bool) async throws {
+/// [keepExisting] なら、すでにあるファイルは上書きしない。項目を1つ展開するたびに [progress] に知らせる。
+func extractArchive(
+  _ archive: String, _ items: [ArchiveItem], _ dest: String, keepExisting: Bool, progress: @escaping ArchiveProgress = { _, _, _ in }
+) async throws {
+  var done = 0
   let result = try await runProcess(
     "/usr/bin/tar",
-    (items.first?.readOptions ?? []) + ["-xf", archive, "-C", dest] + (keepExisting ? ["-k"] : [])
-  )
+    (items.first?.readOptions ?? []) + ["-xvf", archive, "-C", dest] + (keepExisting ? ["-k"] : [])
+  ) { line in
+    guard line.hasPrefix("x ") else { return }
+    done += 1
+    progress(min(done, items.count), items.count, String(line.dropFirst(2)))
+  }
   if result.exitCode != 0 {
-    throw FileSystemException(result.stderr.trimmingCharacters(in: .whitespacesAndNewlines), archive)
+    throw FileSystemException(tarErrors(result.stderr), archive)
   }
 }
 
@@ -251,20 +267,42 @@ nonisolated enum ArchiveFormat: CaseIterable, Sendable {
   }
 }
 
+/// [paths] と、フォルダーならその中の項目の数（tar が入れる項目の数）。
+private func entryCount(_ paths: [String]) -> Int {
+  paths.reduce(0) { count, path in
+    var inside = 0
+    if lstatPath(path).type == .directory, let walker = FileManager.default.enumerator(atPath: path) {
+      while walker.nextObject() != nil {
+        inside += 1
+      }
+    }
+    return count + 1 + inside
+  }
+}
+
 /// [paths] をまとめて [output] に [format] で圧縮する。
 /// 中の名前は各項目の名前から始める。項目は別々のフォルダーにあってよい。失敗したら作りかけの [output] を消す。
-func compressPaths(_ paths: [String], _ output: String, _ format: ArchiveFormat) async throws {
-  var args = ["-c"] + format.tarOptions + ["-f", output]
+/// 項目を1つ入れるたびに [progress] に知らせる。
+func compressPaths(_ paths: [String], _ output: String, _ format: ArchiveFormat, progress: @escaping ArchiveProgress = { _, _, _ in })
+  async throws
+{
+  let total = entryCount(paths)
+  var args = ["-c", "-v"] + format.tarOptions + ["-f", output]
   for path in paths {
     let base = p.basename(path)
     // 「-」で始まる名前をオプションと誤認させない。
     args += ["-C", p.dirname(path), base.hasPrefix("-") ? "./\(base)" : base]
   }
+  var done = 0
   // macOS の tar は拡張属性などを「._名前」の項目として入れるので、入れないようにする。
-  let result = try await runProcess("/usr/bin/tar", args, environment: ["COPYFILE_DISABLE": "1"])
+  let result = try await runProcess("/usr/bin/tar", args, environment: ["COPYFILE_DISABLE": "1"]) { line in
+    guard line.hasPrefix("a ") else { return }
+    done += 1
+    progress(min(done, total), total, String(line.dropFirst(2)))
+  }
   if result.exitCode != 0 {
     // 作られていなければ何もしない。
     _ = unlink(output)
-    throw FileSystemException(result.stderr.trimmingCharacters(in: .whitespacesAndNewlines), output)
+    throw FileSystemException(tarErrors(result.stderr), output)
   }
 }

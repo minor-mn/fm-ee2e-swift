@@ -239,15 +239,20 @@ final class DrivePaste: PasteCommand {
           }
         }
         do {
-          let to = try await pane.encryptedPath(dest, target, isFolder: item.isDir)
+          let to = try await pane.place(dest, target, isFolder: item.isDir) { to in
+            if move {
+              try await movePath(item.path, to)
+            } else {
+              try await copyPath(item.path, to)
+            }
+          }
           if move {
-            try await movePath(item.path, to)
+            pane.removeNameFile(of: item.path)
           } else {
-            try await copyPath(item.path, to)
             pane.evictLater([item.path, to])
           }
           if let replaced {
-            try await moveToTrash(replaced)
+            try await pane.trash(replaced)
           }
           existing[target] = item.isDir ? LocalDir(to) as LocalSource : LocalFile(to, 0)
           first = first ?? target

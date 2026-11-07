@@ -242,7 +242,7 @@ final class ShellSession {
   }
 }
 
-/// 一度だけ値が決まるもの（Dart の Completer の代わり）。
+/// 一度だけ値が決まるもの。
 private final class Latch<T> {
   private(set) var value: T?
   private var waiters: [Int: CheckedContinuation<T?, Never>] = [:]

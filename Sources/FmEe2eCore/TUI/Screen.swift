@@ -226,6 +226,19 @@ final class Screen {
   /// 上に重ねた画面（描いた順。後のものほど上）。
   private(set) var layers: [ScreenLayer] = []
 
+  /// セル（x, y）を掴んだときに、ほかのアプリへファイルとして渡すパス（GUI 版の CapsLock 中のドラッグ）。
+  /// ファイルの行でなければ nil。
+  var filesAt: ((Int, Int) -> [String]?)?
+
+  /// ほかのアプリからこの画面にドロップされたファイルを受け取るもの（GUI 版）。受け取らなければ nil。
+  var fileDrop: (([String]) async -> Void)?
+
+  /// ファイルの受け渡しをやめる（一覧の上にプレビューを重ねたときなど）。
+  func clearFileTargets() {
+    filesAt = nil
+    fileDrop = nil
+  }
+
   private func index(_ x: Int, _ y: Int) -> Int { y * width + x }
 
   /// [x]・[y] のセルの文字（全角文字の右半分は空文字）と書式。透明なセルは nil。

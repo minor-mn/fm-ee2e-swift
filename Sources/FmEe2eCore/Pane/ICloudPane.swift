@@ -7,6 +7,9 @@ enum ICloudState { case checking, notAvailable, unreadable, ready }
 final class ICloudPane: LocalPane {
   var state = ICloudState.checking
 
+  /// ほかのアプリとのファイルの受け渡しは、今はローカルだけ。
+  override var dragsFiles: Bool { false }
+
   /// フォルダーを読めなかった理由。
   private var problem: String?
 

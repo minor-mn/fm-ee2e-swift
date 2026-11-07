@@ -1,7 +1,7 @@
 import Foundation
 
 /// 全画面の一覧（コミットの一覧・ファイルの一覧）の共通部分。上の帯・カーソル・スクロール・下の案内。
-/// （Dart の _ListView。継承する側がこのファイルの外からも見えるので、名前を付けて internal にしている）
+/// （継承する側がこのファイルの外からも見えるので、internal にしている）
 class LogListView: Modal {
   init(_ app: App, _ close: @escaping (()) -> Void, _ title: String) {
     self.app = app
@@ -216,10 +216,10 @@ private func editCommit(_ app: App, _ git: Git, _ root: String, _ hash: String) 
   return true
 }
 
-/// 符号の並びが同じか（Dart の == と同じく、正準等価では比べない）。
+/// 符号の並びが同じか（正準等価では比べない）。
 private func same(_ a: String, _ b: String) -> Bool { a.utf8.elementsEqual(b.utf8) }
 
-/// 後ろの空白を除く（Dart の trimRight）。
+/// 後ろの空白を除く。
 private func trimRight(_ s: String) -> String {
   var scalars = Substring(s).unicodeScalars
   while let last = scalars.last, CharacterSet.whitespacesAndNewlines.contains(last) {

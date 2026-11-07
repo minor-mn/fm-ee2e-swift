@@ -249,7 +249,7 @@ final class TerminalModal: Modal, SelectionSource {
   /// 最後の列まで文字がある行（次の行へ折り返して続いているかもしれない）。
   private static func full(_ line: [ShellCell]) -> Bool { !line.isEmpty && line[line.count - 1].text != " " }
 
-  /// 行・列の組（Dart のレコード (int, int) の代わり）。
+  /// 行・列の組。
   private struct CellPosition: Hashable {
     init(_ row: Int, _ col: Int) {
       self.row = row
@@ -276,7 +276,7 @@ final class TerminalModal: Modal, SelectionSource {
       last += 1
     }
     var links: [CellPosition: String] = [:]
-    // 正規表現の位置は UTF-16 で数えるので、セルも UTF-16 の1単位ごとに並べる（Dart と同じ）。
+    // 正規表現の位置は UTF-16 で数えるので、セルも UTF-16 の1単位ごとに並べる。
     var text = ""
     var cells: [CellPosition] = []
     func flush() {

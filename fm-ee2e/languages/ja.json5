@@ -62,14 +62,13 @@
         "               (SSH はつなぐ前は ~/.ssh/config の Host の一覧。Enter でつなぐ)",
         "Shift+Tab      左の窓をローカル / SSH / Container に切り替え",
         "               (左が SSH のときの右の SSH は、左の接続先から、その ~/.ssh/config でつなぐ)",
-        "               (左が SSH のときは、右はローカル / git status / SSH / Container。",
-        "                git status は接続先のリポジトリ。右がローカルなら G は SCP 転送)",
+        "               (左が SSH のときの git status は接続先のリポジトリ。右がローカルなら G は SCP 転送)",
         "SSH            接続先のファイルを一覧・マーク・コピー・移動・削除",
         "               G/F12: ローカルとの転送  E/F8: 接続先で編集",
         "               S: 接続先でコマンドを実行",
         "Container      Enter: 接続・停止中なら起動確認。G/F12: 反対側のローカルとコピー",
         "               一覧では Space: 複数マーク / C: Create / U: Up / S: Stop / D: Delete / F: 一覧用 compose 選択",
-        "               O: 一覧に戻る（コンテナは動いたまま）。左が Container のときは右はローカル / Container",
+        "               O: 一覧に戻る（コンテナは動いたまま）",
         "Enter          フォルダーなら移動",
         "               .zip .tar.gz .tar.xz は中をフォルダーのように表示 (読むだけ)",
         "               Driveのファイルは一時フォルダーに復号",
@@ -90,6 +89,9 @@
         "               (右が git status のときは Git コマンド。左で押すと左のファイルに",
         "                git add / restore / rm を、ファイルの状態に合わせて出す)",
         "               カーソルとマークの候補が複数ならマークだけ、1件ならカーソル",
+        "               G の転送は裏で動く。転送を始めると、転送先の側が転送タブ（転送の一覧）に切り替わる",
+        "               転送タブの G / F12 は、カーソル (マークがあればマーク) の転送・項目の cancel・retry と、送っている転送をまるごと止める cancel running をメニューに出す",
+        "               転送タブで Enter を押すと、切り替わる前のタブに戻る (転送は裏で続く)",
         "D / Del        削除 (ゴミ箱へ移動。SSH は rm で削除)",
         "A              権限変更",
         "S              シェル (コマンドを入れて枠の中で実行。終わったら Enter で戻る)",
@@ -101,7 +103,7 @@
         "               SSH は接続先の zip・tar・gzip・xz で作れる形式だけ)",
         "U              カーソルの .zip .tar.gz .tar.xz をカレントに展開",
         "               (SSH は接続先の tar・bsdtar・unzip で。なければ展開できない)",
-        "Ctrl+L         ディレクトリへ移動",
+        "Ctrl+L         ディレクトリへ移動 (↑↓ で、Ctrl+L で移動したディレクトリの履歴)",
         "~              ホームへ移動",
         ".              隠しファイルを表示",
         "V              画像・動画のプレビューを反対側の窓に出す (on・off。SSH は画像だけ)",
@@ -182,13 +184,10 @@
     // Google Drive
     drive_unavailable: "Google Driveを使えません。",
     drive_loading: "Google Driveのフォルダーを読み込み中です。",
-    in_progress: "{title}中…",
-    in_progress_item: "{title}中… {name}",
     upload: "アップロード",
     drive_upload_confirm: "{label}を暗号化して Google Drive の {location} にアップロードします。",
     download: "ダウンロード",
     drive_download_confirm: "{label}を復号して {dir} にダウンロードします。",
-    in_progress_count: "{title}中（{index}/{total}）{name}",
     // iCloud Drive
     icloud_unavailable: "iCloud Driveは使えません。",
     icloud_loading: "iCloud Driveのフォルダーを読み込み中です。",
@@ -205,6 +204,19 @@
     staging_remove_failed: "一時フォルダー {staging} を削除できません: {error}",
     copy_right: "右へコピー",
     copy_left: "左へコピー",
+  },
+  // 転送タブ（G・F12 の転送の一覧）
+  transfers: {
+    title: "転送",
+    summary: "転送中 {running}・待機 {waiting}・完了 {done}・失敗 {failed}・中止 {cancelled}",
+    failed_count: "失敗{count}",
+    job: "{title} → {dest}",
+    preparing: "転送の準備中…",
+    progress: "{title}（{index}/{total}）{name}",
+    progress_waiting: "　ほか待機{count}件",
+    failed_status: "転送で{count}件失敗しました（転送タブ）",
+    done_status: "終わりました: {title}",
+    cancelled_status: "中止しました: {title}",
   },
   // ダイアログ共通
   dialogs: {
@@ -251,6 +263,7 @@
     compress_title: "圧縮",
     compress_message: "{count}項目を {place} に圧縮します。ファイル名",
     compressing: "圧縮中…",
+    compressing_count: "圧縮中…（{done}/{total}）{name}",
     ssh_unavailable: "{host} には zip も tar（gzip・xz）もないので、圧縮できません。",
     reading: "「{name}」を読み込み中…",
     extract_title: "展開",
@@ -262,6 +275,7 @@
     overwrite: "上書きする",
     keep_existing: "今あるファイルは残す",
     extracting: "「{name}」を展開中…",
+    extracting_count: "「{archive}」を展開中…（{done}/{total}）{name}",
   },
   // 削除
   delete: {
@@ -328,6 +342,7 @@
     not_found: "ディレクトリがありません: {path}",
     local_prompt: "パス（~ はホーム）",
     ssh_prompt: "接続先のパス（~ はホーム）",
+    history_save_failed: "移動の履歴を保存できません: {error}",
   },
   // コマンド共通
   command: {
@@ -785,6 +800,7 @@
     // Git の窓のタイトルと案内
     loading: "Git 読み込み中…",
     no_git: "接続先に git がありません。",
+    no_local_git: "有効な Git が未導入です。",
     not_repository: "git 管理されていないフォルダーです。",
   },
 }

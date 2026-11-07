@@ -1,7 +1,7 @@
 import Darwin
 import Foundation
 
-/// ファイル操作の失敗（Dart の FileSystemException の代わり）。
+/// ファイル操作の失敗。
 nonisolated struct FileSystemException: Error, CustomStringConvertible {
   init(_ message: String = "", _ path: String? = nil) {
     self.message = message
@@ -20,7 +20,7 @@ nonisolated struct FileSystemException: Error, CustomStringConvertible {
   }
 }
 
-/// ファイルシステムの項目の種類（Dart の FileSystemEntityType の代わり）。
+/// ファイルシステムの項目の種類。
 nonisolated enum FileSystemEntityType: Sendable {
   case file
   case directory
@@ -29,7 +29,7 @@ nonisolated enum FileSystemEntityType: Sendable {
   case other
 }
 
-/// stat の結果（Dart の FileStat の代わり）。
+/// stat の結果。
 nonisolated struct FileStat: Sendable {
   let type: FileSystemEntityType
   let size: Int
@@ -38,7 +38,7 @@ nonisolated struct FileStat: Sendable {
   /// st_mode（種類のビットを含む。パーミッションは下位12ビット）。
   let mode: Int
 
-  /// 存在しないときの値（Dart と同じく、サイズは -1）。
+  /// 存在しないときの値（サイズは -1）。
   static let notFound = FileStat(type: .notFound, size: -1, modified: Date(timeIntervalSince1970: 0), mode: 0)
 }
 
@@ -61,13 +61,13 @@ private nonisolated func fileStat(_ path: String, follow: Bool) -> FileStat {
   return FileStat(type: type, size: Int(st.st_size), modified: modified, mode: Int(st.st_mode))
 }
 
-/// [path] の stat（シンボリックリンクは先をたどる。Dart の FileStat.stat と同じ）。なければ [FileSystemEntityType.notFound]。
+/// [path] の stat（シンボリックリンクは先をたどる）。なければ [FileSystemEntityType.notFound]。
 nonisolated func statPath(_ path: String) -> FileStat { fileStat(path, follow: true) }
 
 /// [path] の lstat（シンボリックリンクはたどらない）。
 nonisolated func lstatPath(_ path: String) -> FileStat { fileStat(path, follow: false) }
 
-/// [dir] の中の項目のパス（Dart の Directory.list(followLinks: false) と同じ）。開けなければ [FileSystemException]。
+/// [dir] の中の項目のパス（シンボリックリンクはたどらない）。開けなければ [FileSystemException]。
 nonisolated func listDirectory(_ dir: String) throws -> [String] {
   do {
     return try FileManager.default.contentsOfDirectory(atPath: dir).map { p.join(dir, $0) }

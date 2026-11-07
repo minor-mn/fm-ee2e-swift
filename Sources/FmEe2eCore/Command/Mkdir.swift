@@ -66,11 +66,11 @@ final class DriveMkdir: MkdirCommand {
 
   override func create(_ c: CommandContext, _ name: String) async throws {
     let pane = c.pane as! DrivePane
-    try createDirectory(try await pane.encryptedPath(pane.dirPath, name, isFolder: true))
+    try await pane.place(pane.dirPath, name, isFolder: true) { try createDirectory($0) }
   }
 }
 
-/// Dart の Directory.create() と同じく、すでにフォルダーがあれば何もしない。
+/// フォルダーを作る。すでにフォルダーがあれば何もしない。
 private func createDirectory(_ path: String) throws {
   var isDir: ObjCBool = false
   if FileManager.default.fileExists(atPath: path, isDirectory: &isDir) && isDir.boolValue {

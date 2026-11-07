@@ -1389,10 +1389,10 @@ func parseNameStatus(_ output: String) -> [CommitFile] {
   return files
 }
 
-// Dart の文字列と同じく、符号の並びのまま比べて切る。Swift の String は正準等価で比べ、
+// 文字列は符号の並びのまま比べて切る。Swift の String は正準等価で比べ、
 // 結合文字（濁点など）を前の文字とまとめて1文字として扱うので、パスや差分の行には使わない。
 
-/// [s] を [separator] の文字（ASCII）で分ける。空の欄も残す（Dart の split と同じ）。
+/// [s] を [separator] の文字（ASCII）で分ける。空の欄も残す。
 private func splitOn(_ s: String, _ separator: Unicode.Scalar) -> [String] {
   let sep = UInt8(separator.value)
   return s.utf8.split(separator: sep, omittingEmptySubsequences: false).map { String(decoding: $0, as: UTF8.self) }
@@ -1451,10 +1451,10 @@ private func indexOfBytes(_ bytes: [UInt8], _ needle: [UInt8], from: Int = 0) ->
 /// [s] の UTF-8 の [index] バイト目の1文字（ASCII の状態の文字に使う）。
 private func unit(_ s: String, _ index: Int) -> String { slice(s, index, index + 1) }
 
-/// 前後の空白を除く（Dart の trim）。
+/// 前後の空白を除く。
 private func trim(_ s: String) -> String { s.trimmingCharacters(in: .whitespacesAndNewlines) }
 
-/// 後ろの空白を除く（Dart の trimRight）。
+/// 後ろの空白を除く。
 private func trimRight(_ s: String) -> String {
   var scalars = Substring(s).unicodeScalars
   while let last = scalars.last, CharacterSet.whitespacesAndNewlines.contains(last) {
