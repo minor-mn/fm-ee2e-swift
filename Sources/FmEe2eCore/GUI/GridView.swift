@@ -755,7 +755,9 @@ final class GridView: NSView, NSTextInputClient {
   /// 後ろにある（ほかのアプリが前にある）ときにファイルの行を押したら、前に出すのを待つ
   /// （最初のクリックを受け取るのは [acceptsFirstMouse]）。ドラッグせずに離したら、いつもどおり前に出る。
   override func shouldDelayWindowOrdering(for event: NSEvent) -> Bool {
-    clickedBehind = filesToDrag(event, fromBehind: true) != nil
+    // 前にあるときにも呼ばれることがあるので、本当に後ろにある（アプリが前にないか、窓が選ばれていない）ときだけにする。
+    let behind = !NSApp.isActive || !(window?.isKeyWindow ?? false)
+    clickedBehind = behind && filesToDrag(event, fromBehind: true) != nil
     return clickedBehind
   }
 
