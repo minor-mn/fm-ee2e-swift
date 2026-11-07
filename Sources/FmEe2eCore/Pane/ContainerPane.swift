@@ -13,20 +13,26 @@ struct ContainerSection {
   let title: String
 }
 
-/// 今のフォルダーにある Dockerfile。Enter で、そこから作るコンテナの設定を作り、ビルドして作成する。
+/// 今のフォルダーにある Dockerfile・Containerfile。Enter で、そこから作るコンテナの設定を作り、ビルドして作成する。
 struct DockerfileTarget {
   let path: String
   /// ビルドしてつけるイメージの名前（フォルダー名から決める）。
   let image: String
   let built: Bool
 
-  /// Dockerfile、Dockerfile.<名前>、<名前>.Dockerfile。
-  static func isDockerfile(_ name: String) -> Bool {
+  /// Containerfile（Containerfile.<名前>、<名前>.Containerfile を含む）。一覧では Dockerfile と別のブロックに出す。
+  var isContainerfile: Bool { Self.stem(p.basename(path)) == "containerfile" }
+
+  /// ファイル名の土台（dockerfile か containerfile）。どちらでもなければ nil。
+  private static func stem(_ name: String) -> String? {
     let lower = name.lowercased()
-    return lower == "dockerfile" || lower.hasPrefix("dockerfile.") || lower.hasSuffix(".dockerfile")
+    return ["dockerfile", "containerfile"].first { lower == $0 || lower.hasPrefix("\($0).") || lower.hasSuffix(".\($0)") }
   }
 
-  /// フォルダー名を土台に、Dockerfile.dev なら -dev、api.Dockerfile なら -api を付けた名前（タグは latest）。
+  /// Dockerfile、Dockerfile.<名前>、<名前>.Dockerfile と、同じ形の Containerfile。
+  static func isDockerfile(_ name: String) -> Bool { stem(name) != nil }
+
+  /// フォルダー名を土台に、Dockerfile.dev なら -dev、api.Dockerfile なら -api を付けた名前（タグは latest）。Containerfile も同じ。
   static func imageName(_ path: String) -> String {
     func clean(_ text: String) -> String {
       let mapped = text.lowercased().map { $0.isASCII && ($0.isLetter || $0.isNumber || "._-".contains($0)) ? $0 : "-" }
@@ -35,7 +41,8 @@ struct DockerfileTarget {
     let base = clean(p.basename(p.dirname(path)))
     let file = p.basename(path)
     let lower = file.lowercased()
-    let suffix = lower == "dockerfile" ? "" : lower.hasPrefix("dockerfile.") ? String(file.dropFirst(11)) : String(file.dropLast(11))
+    let length = (stem(file) ?? "dockerfile").count + 1
+    let suffix = lower == stem(file) ? "" : lower.hasPrefix("\(stem(file) ?? "").") ? String(file.dropFirst(length)) : String(file.dropLast(length))
     let name = [base.isEmpty ? "image" : base, clean(suffix)].filter { !$0.isEmpty }.joined(separator: "-")
     return name + ":latest"
   }
@@ -67,9 +74,13 @@ final class ContainerPane: SshPane {
   private var filesDirectory: String?
   private var notice: [String]?
   private var serviceStopped = false
-  /// 一覧をネットワークごとに並べる（F12 の by Network）。その間の F12 の先頭は by Status で、選ぶと元の並びに戻る。
-  private(set) var byNetwork = false
+  /// 一覧をネットワークごとに並べる（by Network）。これが最初の並び。F12 の先頭の by Status で状態ごとの並びに替え、by Network で戻す。
+  private(set) var byNetwork = true
   private var widestDetail = 0
+  /// 一覧を読んだときにあったイメージ（Apple Container の一覧と同じ形の名前）。D でイメージだけの行を消すのに使う。
+  private var presentImages = Set<String>()
+  /// --dns-domain を付けない設定のコンテナが使う DNS ドメイン。まだ作っていないコンテナの「名前.ドメイン」を組み立てるのに使う。
+  private var defaultDNSDomain: String?
 
   init(_ app: App, client: ContainerClient = ContainerClient()) {
     self.client = client
@@ -119,39 +130,99 @@ final class ContainerPane: SshPane {
     Set(targetMarks.compactMap { ($0.entry.data as? ContainerTarget)?.status.lowercased() })
   }
 
+  /// コンテナがなくイメージだけがある行（未作成のコンテナ・ビルド済みの Dockerfile）の、そのイメージ。D で消す。
+  func imageOnly(_ entry: Entry) -> String? {
+    let image: String?
+    switch entry.data {
+    case let target as ContainerTarget: image = target.status == "missing" ? target.details.image : nil
+    case let dockerfile as DockerfileTarget: image = dockerfile.image
+    default: image = nil
+    }
+    return image.map(ContainerClient.normalizedImage).flatMap { presentImages.contains($0) ? $0 : nil }
+  }
+
   func canPerformContainerAction(_ action: String) -> Bool {
     guard ssh == nil && ready else { return false }
+    // D は、停止中のコンテナとイメージだけの行を一緒に消せる。
+    if action == "delete" {
+      let targets = targetMarks
+      return !targets.isEmpty && targets.allSatisfy {
+        ($0.entry.data as? ContainerTarget)?.status.lowercased() == "stopped" || imageOnly($0.entry) != nil
+      }
+    }
     guard targetStatuses.count == 1 else { return false }
     switch action {
     case "create": return targetStatuses.contains("missing")
-    case "start", "delete": return targetStatuses.contains("stopped")
+    case "start": return targetStatuses.contains("stopped")
     case "stop": return targetStatuses.contains("running")
     default: return false
     }
   }
 
-  /// F12 は、カーソルがコンテナ（未作成のものを含む）の上にあるときだけ。
-  var canShowLogs: Bool { ssh == nil && ready && current?.data is ContainerTarget }
+  /// F12 は、コンテナの一覧を出しているときに使える。
+  var canShowMenu: Bool { ssh == nil && ready }
 
-  /// カーソルのコンテナのログを選んで、画面全体の端末で見せる（F12）。終わったあとも ↑↓ PgUp PgDn でさかのぼれる。
-  /// 未作成のコンテナには自分のログがないので、Apple Container のサービスのログだけを選べる。
-  func showLogs() async {
-    guard canShowLogs, let target = current?.data as? ContainerTarget else { return }
-    var choices: [(String, [String])] = [(tr(byNetwork ? "container.logs.by_status" : "container.logs.by_network"), [])]
-    if target.status != "missing" {
-      choices.append((tr("container.logs.output"), ["logs", target.name]))
-      choices.append((tr("container.logs.boot"), ["logs", "--boot", target.name]))
+  /// F12 のメニュー。表示の切り替え・ログ・イメージの削除を選ぶ。
+  /// ログは画面全体の端末で見せる（終わったあとも ↑↓ PgUp PgDn でさかのぼれる）。コンテナ自身のログは、カーソルが作成済みのコンテナの上にあるときだけ選べる。
+  func showMenu() async {
+    guard canShowMenu else { return }
+    let target = current?.data as? ContainerTarget
+    let prefix = target.map { "\($0.name) $ " } ?? ""
+    func logs(_ args: [String]) -> () async -> Void {
+      { [self] in await runInTerminal(app, "\(prefix)container \(args.joined(separator: " "))", client.executable, args, frame: .page) }
     }
-    choices.append((tr("container.logs.system"), ["system", "logs"]))
-    guard let index = await app.askChoice(tr("container.logs.title", ["name": target.name]), choices.map(\.0)) else { return }
-    let args = choices[index].1
-    if args.isEmpty {
-      byNetwork.toggle()
-      resetCursor()
-      await load()
-      return
+    var choices: [(String, () async -> Void)] = [
+      (tr(byNetwork ? "container.logs.by_status" : "container.logs.by_network"), { [self] in
+        byNetwork.toggle()
+        resetCursor()
+        await load()
+      })
+    ]
+    if let target, target.status != "missing" {
+      choices.append((tr("container.logs.output"), logs(["logs", target.name])))
+      choices.append((tr("container.logs.boot"), logs(["logs", "--boot", target.name])))
     }
-    await runInTerminal(app, "\(target.name) $ container \(args.joined(separator: " "))", client.executable, args, frame: .page)
+    choices.append((tr("container.logs.system"), logs(["system", "logs"])))
+    choices.append((tr("container.images.delete"), { [self] in await deleteImages() }))
+    let title = target.map { tr("container.menu.title_for", ["name": $0.name]) } ?? tr("container.menu.title")
+    guard let index = await app.askChoice(title, choices.map(\.0)) else { return }
+    await choices[index].1()
+  }
+
+  /// イメージを選んで削除する。消すたびに一覧を出し直し、Esc で終える。
+  /// コンテナが使っているイメージには、そのコンテナ名を添える（消せるかは Apple Container に任せる）。
+  private func deleteImages() async {
+    while true {
+      let images: [String]
+      let containers: [ContainerInfo]
+      do {
+        images = try await client.imageNames().sorted()
+        containers = try await client.list()
+      } catch {
+        await app.showError(error)
+        return
+      }
+      if images.isEmpty {
+        app.showStatus(tr("container.images.none"))
+        return
+      }
+      let labels = images.map { image in
+        let users = containers.filter { $0.details.image.map(ContainerClient.normalizedImage) == ContainerClient.normalizedImage(image) }
+          .map(\.name).sorted()
+        return users.isEmpty ? image : tr("container.images.in_use", ["image": image, "names": users.joined(separator: ", ")])
+      }
+      guard let index = await app.askChoice(tr("container.images.title"), labels) else { return }
+      let image = images[index]
+      guard await app.confirm(tr("container.images.delete"), tr("container.images.delete_confirm", ["image": image])) else { continue }
+      do {
+        let result = try await app.withProgress(tr("container.images.deleting")) { try await client.checked(["image", "rm", image]) }
+        // 「Reclaimed 2.02 GB in disk space」のような、空いた容量の行を添える。
+        let reclaimed = result.stdout.split(separator: "\n").last.map(String.init) ?? ""
+        app.showStatus(tr("container.images.deleted", ["image": image, "detail": reclaimed]))
+      } catch {
+        await app.showError(error)
+      }
+    }
   }
 
   /// ネットワークごとに、「名前 - サブネット」を見出しにして、つながっているコンテナ（止まっているものも含む）を並べる。
@@ -185,7 +256,7 @@ final class ContainerPane: SshPane {
     if canPerformContainerAction("stop") { keys[2] = ("Stop", "S") }
     if canPerformContainerAction("delete") { keys[3] = ("Delete", "D") }
     if canEditSettings { keys[4] = ("Attr", "A") }
-    if canShowLogs { keys[11] = ("Container", "") }
+    if canShowMenu { keys[11] = ("Container", "") }
     return keys
   }
 
@@ -239,9 +310,12 @@ final class ContainerPane: SshPane {
       catch { composeError = errorMessage(error) }
     }
     let containers = try await client.list()
+    presentImages = (try? await client.imageNames()) ?? []
+    defaultDNSDomain = await client.defaultDNSDomain()
     if byNetwork { return try await networkEntries(containers) }
-    // 設定のあるもの（保存済みの設定か compose）を、稼働中（current (up)）とそれ以外（current (down)）に分ける。
-    // 設定のないコンテナは、稼働中のものだけ other に出す。最後に今のフォルダーの Dockerfile。
+    // 動いているコンテナ（設定にあるかを問わない）を up、今のフォルダーの設定（保存済みの設定か compose）にあるものを
+    // down（作ってあって止まっている）・no container（イメージだけある）・no image（設定だけ）に分け、
+    // 最後に今のフォルダーの Dockerfile と Containerfile。設定にない止まっているコンテナは出さない（by Network で見る）。
     var current: [Entry] = []
     var seen = Set<String>()
     // 未作成のものは、保存した作成設定から帯に出す設定を読む。
@@ -269,17 +343,22 @@ final class ContainerPane: SshPane {
     let dockerfiles = ((try? FileManager.default.contentsOfDirectory(atPath: here)) ?? []).filter(DockerfileTarget.isDockerfile).sorted()
       .map { p.join(here, $0) }.filter { !used.contains(p.normalize($0)) }
     if !dockerfiles.isEmpty {
-      let images = (try? await client.imageNames()) ?? []
       dockerfileEntries = dockerfiles.map { path in
         let image = DockerfileTarget.imageName(path)
         return Entry(name: p.basename(path), isDir: false,
-          data: DockerfileTarget(path: path, image: image, built: images.contains(ContainerClient.normalizedImage(image))))
+          data: DockerfileTarget(path: path, image: image, built: presentImages.contains(ContainerClient.normalizedImage(image))))
       }
     }
+    func missing(_ entry: Entry) -> Bool { (entry.data as? ContainerTarget)?.status == "missing" }
     func running(_ entry: Entry) -> Bool { (entry.data as? ContainerTarget)?.running == true }
+    func containerfile(_ entry: Entry) -> Bool { (entry.data as? DockerfileTarget)?.isContainerfile == true }
     var entries: [Entry] = []
-    for (key, block) in [("current_up", current.filter(running)), ("current_down", current.filter { !running($0) }),
-      ("other", other), ("dockerfile", dockerfileEntries)] where !block.isEmpty {
+    for (key, block) in [("up", current.filter(running) + other),
+      ("down", current.filter { !running($0) && !missing($0) }),
+      ("no_container", current.filter { missing($0) && imageOnly($0) != nil }),
+      ("no_image", current.filter { missing($0) && imageOnly($0) == nil }),
+      ("dockerfile", dockerfileEntries.filter { !containerfile($0) }),
+      ("containerfile", dockerfileEntries.filter(containerfile))] where !block.isEmpty {
       let title = tr("container.section.\(key)")
       entries.append(Entry(name: title, isDir: false, data: ContainerSection(title: title)))
       entries += block
@@ -324,7 +403,7 @@ final class ContainerPane: SshPane {
   func enter() async {
     if serviceStopped {
       guard await app.confirm(tr("container.start_system"), tr("container.start_system_confirm")) else { return }
-      do { _ = try await app.withProgress(tr("container.starting")) { try await client.checked(["system", "start"]) } }
+      do { try await app.withProgress(tr("container.starting")) { try await client.startSystem() } }
       catch { await app.showError(error) }
       await load()
     } else if let current { await open(current) }
@@ -364,10 +443,24 @@ final class ContainerPane: SshPane {
           }
         }
       } else {
-        guard !jobs.isEmpty else { app.showStatus(tr("container.no_action_targets")); return }
-        let messageKey = action == "delete" ? "container.bulk_delete_confirm" : action == "stop" ? "container.bulk_stop_confirm" : "container.bulk_start_confirm"
-        let message = tr(messageKey) + "\n\n" + jobs.map { $0.1.name }.joined(separator: "\n")
-        guard await app.confirm(tr("container.\(action)"), message, yes: tr("container.\(action)")) else { return }
+        // D では、イメージだけの行（未作成のコンテナ・ビルド済みの Dockerfile）のイメージも消す。同じイメージは1回だけ。
+        var imageJobs: [(marks: [Mark], image: String)] = []
+        if action == "delete" {
+          for mark in targets {
+            guard let image = imageOnly(mark.entry) else { continue }
+            if let index = imageJobs.firstIndex(where: { $0.image == image }) { imageJobs[index].marks.append(mark) }
+            else { imageJobs.append(([mark], image)) }
+          }
+        }
+        guard !jobs.isEmpty || !imageJobs.isEmpty else { app.showStatus(tr("container.no_action_targets")); return }
+        // 起動（U）はすぐ実行する。停止・破棄だけ確かめる。
+        if action != "start" {
+          let messageKey = action == "delete" ? "container.bulk_delete_confirm" : "container.bulk_stop_confirm"
+          var sections: [String] = []
+          if !jobs.isEmpty { sections.append(tr(messageKey) + "\n\n" + jobs.map { $0.1.name }.joined(separator: "\n")) }
+          if !imageJobs.isEmpty { sections.append(tr("container.bulk_delete_images_confirm") + "\n\n" + imageJobs.map(\.image).joined(separator: "\n")) }
+          guard await app.confirm(tr("container.\(action)"), sections.joined(separator: "\n\n"), yes: tr("container.\(action)")) else { return }
+        }
         await app.withProgress(tr("container.progress_action")) {
           for (mark, target) in jobs {
             do {
@@ -379,6 +472,12 @@ final class ContainerPane: SshPane {
               try await client.checked([action, target.name])
               marks.removeValue(forKey: keyOf(mark.entry))
             } catch { errors.append("\(target.name): \(errorMessage(error))") }
+          }
+          for (imageMarks, image) in imageJobs {
+            do {
+              try await client.checked(["image", "rm", image])
+              for mark in imageMarks { marks.removeValue(forKey: keyOf(mark.entry)) }
+            } catch { errors.append("\(image): \(errorMessage(error))") }
           }
         }
       }
@@ -642,38 +741,39 @@ final class ContainerPane: SshPane {
     super.drawBody(screen, x, y, width, rows, focused: focused)
   }
 
-  /// 右端の列に出すもの。サービスならコンテナ名、Dockerfile ならイメージ名。設定のないコンテナは名前の列と同じなので出さない。
+  /// 右端の列に出すもの。コンテナは、Mac やほかのコンテナから引ける「コンテナ名.ドメイン」（ドメインがなければ出さない）。
+  /// 作ったコンテナは Apple Container の一覧のドメイン、まだ作っていないものは設定の --dns-domain（なければ既定のドメイン）。
+  /// Dockerfile はイメージ名。
   private func detailOf(_ entry: Entry) -> String {
     if let dockerfile = entry.data as? DockerfileTarget { return dockerfile.image }
-    if let target = entry.data as? ContainerTarget, target.service != nil, target.name != entry.name { return target.name }
-    return ""
+    guard let target = entry.data as? ContainerTarget else { return "" }
+    let domain = target.details.dnsDomain ?? (target.status == "missing" ? defaultDNSDomain : nil)
+    return domain.map { "\(target.name).\($0)" } ?? ""
   }
 
-  /// 名前を左に、状態とコンテナ名（Dockerfile はイメージ名）を右端に寄せて描く（ほかのタブのサイズ・日時と同じ並び）。
-  /// 狭い窓ではコンテナ名の列を省く。
+  /// 名前を左に、コンテナ名.ドメイン（Dockerfile はイメージ名）を右端に寄せて描く（ほかのタブのサイズ・日時と同じ並び）。
+  /// by Network では、その左に状態（running など）も出す。by Status ではブロックで状態が分かるので出さない。
+  /// 狭い窓ではコンテナ名.ドメインの列を省く。
   override func drawRow(_ screen: Screen, _ entry: Entry, _ x: Int, _ y: Int, _ width: Int, _ style: Style, marked: Bool) {
     if let section = entry.data as? ContainerSection {
       let line = "── \(section.title) " + String(repeating: "─", count: max(0, width - textWidth(section.title) - 5))
       screen.text(x + 1, y, truncate(line, max(0, width - 1)), style.copyWith(fg: colors.muted, bold: true), maxWidth: max(0, width - 1))
       return
     }
-    if let dockerfile = entry.data as? DockerfileTarget {
-      drawColumns(screen, entry.name, dockerfile.built ? "built" : Self.noneLabel, detailOf(entry), x, y, width, style, highlight: false, marked: marked)
+    if entry.data is DockerfileTarget {
+      drawColumns(screen, entry.name, nil, detailOf(entry), x, y, width, style, highlight: false, marked: marked)
       return
     }
     guard let target = entry.data as? ContainerTarget else { super.drawRow(screen, entry, x, y, width, style, marked: marked); return }
-    drawColumns(screen, entry.name, target.status == "missing" ? Self.noneLabel : target.status, detailOf(entry), x, y, width, style,
-      highlight: target.running, marked: marked)
+    drawColumns(screen, entry.name, byNetwork ? target.status : nil, detailOf(entry), x, y, width, style, highlight: target.running, marked: marked)
   }
 
-  /// まだ作っていないコンテナ・ビルドしていないイメージの状態の表示（ほかのタブの <DIR>・<UP> と同じ書き方）。
-  static let noneLabel = "<NONE>"
-
-  private func drawColumns(_ screen: Screen, _ name: String, _ status: String, _ detail: String,
+  /// [status] が nil なら状態の列を作らない。
+  private func drawColumns(_ screen: Screen, _ name: String, _ status: String?, _ detail: String,
     _ x: Int, _ y: Int, _ width: Int, _ style: Style, highlight: Bool, marked: Bool) {
     let contentWidth = max(0, width - 3)
     guard contentWidth > 0 else { return }
-    let statusWidth = min(9, max(0, contentWidth - 5))
+    let statusWidth = status == nil ? 0 : min(9, max(0, contentWidth - 5))
     let detailWidth = width >= 50 && widestDetail > 0 ? min(widestDetail, contentWidth / 2) : 0
     let right = statusWidth + (detailWidth > 0 ? 1 + detailWidth : 0)
     let nameWidth = max(0, contentWidth - right - (right > 0 ? 1 : 0))
@@ -684,7 +784,7 @@ final class ContainerPane: SshPane {
     if detailWidth > 0, !detail.isEmpty {
       screen.text(end - detailWidth, y, truncate(detail, detailWidth), rowStyle, maxWidth: detailWidth)
     }
-    if statusWidth > 0 {
+    if statusWidth > 0, let status {
       let status = truncate(status, statusWidth)
       let statusEnd = end - (detailWidth > 0 ? detailWidth + 1 : 0)
       screen.text(statusEnd - textWidth(status), y, status, rowStyle, maxWidth: statusWidth)

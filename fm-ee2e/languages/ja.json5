@@ -68,6 +68,7 @@
         "               S: 接続先でコマンドを実行",
         "Container      Enter: 接続・停止中なら起動確認。G/F12: 反対側のローカルとコピー",
         "               一覧では Space: 複数マーク / C: Create / U: Up / S: Stop / D: Delete / F: 一覧用 compose 選択",
+        "               一覧の F12: 表示の切り替え・ログ・イメージの削除",
         "               O: 一覧に戻る（コンテナは動いたまま）",
         "Enter          フォルダーなら移動",
         "               .zip .tar.gz .tar.xz は中をフォルダーのように表示 (読むだけ)",
@@ -701,25 +702,41 @@
     delete: "破棄",
     not_created: "まだ作成されていません。C でコンテナを作成してください。",
     no_action_targets: "この操作を実行できるコンテナがありません。",
-    bulk_start_confirm: "次のコンテナを起動しますか？",
     bulk_stop_confirm: "次のコンテナを停止しますか？",
     bulk_delete_confirm: "次の停止中のコンテナを破棄しますか？\nコンテナ内のファイルは削除されます。",
+    bulk_delete_images_confirm: "次のイメージを削除しますか？",
     mark_count: "{side}: {count}件のコンテナをマーク",
-    // F12 で選ぶコンテナのログ。
+    // F12 のメニュー。
+    menu: {
+      title: "Container",
+      title_for: "Container: {name}",
+    },
+    // F12 で選ぶ表示の切り替えとログ。
     logs: {
-      title: "{name} のログ",
       by_network: "by Network",
       by_status: "by Status",
       output: "コンテナの出力（container logs）",
       boot: "起動のログ・OOM など（container logs --boot）",
       system: "Apple Container のサービスのログ（直近 5 分）",
     },
+    // F12 の「イメージを削除」。
+    images: {
+      delete: "イメージを削除",
+      title: "削除するイメージ",
+      in_use: "{image}（使用中: {names}）",
+      none: "イメージはありません。",
+      delete_confirm: "イメージ「{image}」を削除しますか？",
+      deleting: "イメージを削除中…",
+      deleted: "{image} を削除しました。{detail}",
+    },
     // 一覧のブロックの見出し。
     section: {
-      current_up: "current (up)",
-      current_down: "current (down)",
-      other: "other",
+      up: "up",
+      down: "down",
+      no_container: "no container",
+      no_image: "no image",
       dockerfile: "Dockerfile",
+      containerfile: "Containerfile",
     },
     // 接続前に上の帯に出すコンテナの設定の名前。
     info: {

@@ -53,9 +53,18 @@ func drawOwnership(_ screen: Screen, _ y: Int, _ pane: Pane) {
     return
   }
   var x = 2
+  var valueEnd = x
   for (label, value) in [("Owner", ownership.owner), ("Group", ownership.group), ("Mode", ownership.permissions)] {
     x += screen.text(x, y, label, bg.copyWith(fg: Palette.muted))
-    x += screen.text(x + 1, y, value, bg) + 4
+    valueEnd = x + 1 + screen.text(x + 1, y, value, bg)
+    x = valueEnd + 3
+  }
+  // シンボリックリンクなら、Mode の右に1マス空けて指している先を出す。
+  if let link = ownership.linkTarget {
+    let room = screen.width - 2 - (valueEnd + 1)
+    if room > 0 {
+      screen.text(valueEnd + 1, y, truncate(link, room), bg, maxWidth: room)
+    }
   }
 }
 

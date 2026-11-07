@@ -26,6 +26,8 @@ struct ContainerDetails: Equatable {
   var addresses: [String] = []
   /// Mac のフォルダーをそのままつないだマウント（virtiofs）。作成済みのコンテナの一覧からだけ読む。
   var binds: [ContainerBind] = []
+  /// コンテナの DNS ドメイン（--dns-domain）。コンテナ自身は「名前.ドメイン」で引ける。
+  var dnsDomain: String?
 
   /// 保存した create の引数から読む。指定のない項目は空のまま（Apple Container の既定値を推測しない）。
   init(image: String? = nil, create: [String] = []) {
@@ -40,6 +42,7 @@ struct ContainerDetails: Equatable {
       case "--memory", "-m": memory = value
       case "--publish", "-p": value.map { ports.append($0) }
       case "--network": value.map { networks.append(String($0.prefix { $0 != "," })) }
+      case "--dns-domain": dnsDomain = value
       case "--rosetta": rosetta = true; index += 1; continue
       default: index += 1; continue
       }
@@ -90,6 +93,33 @@ class ContainerClient {
     guard let range = message.range(of: pattern, options: .regularExpression) else { return nil }
     let host = String(message[range])
     return (host, host.components(separatedBy: ".")[3])
+  }
+
+  /// Apple Container のサービスを起動する。サービスがこのアプリのバックグラウンド項目にならないよう、
+  /// アプリに紐づかないプロセスとして container system start を実行する。その形で起動できなければ、普通に実行する。
+  func startSystem() async throws {
+    let args = ["system", "start"]
+    guard let result = await runDisclaimed(executable, args) else {
+      try await checked(args)
+      return
+    }
+    if result.exitCode != 0 {
+      let message = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+      throw AppError(message.isEmpty ? exitStatusText(result.exitCode) : message)
+    }
+  }
+
+  /// --dns-domain を付けずに作ったコンテナが使う DNS ドメイン（container system property list の [dns] の domain）。
+  func defaultDNSDomain() async -> String? {
+    guard let result = try? await execute(["system", "property", "list"]), result.exitCode == 0 else { return nil }
+    var section = ""
+    for line in result.stdout.components(separatedBy: .newlines).map({ $0.trimmingCharacters(in: .whitespaces) }) {
+      if line.hasPrefix("[") { section = line; continue }
+      guard section == "[dns]", line.hasPrefix("domain") else { continue }
+      let value = line.drop { $0 != "=" }.dropFirst().trimmingCharacters(in: .whitespaces).trimmingCharacters(in: CharacterSet(charactersIn: "\""))
+      return value.isEmpty ? nil : value
+    }
+    return nil
   }
 
   func systemRunning() async throws -> Bool {
@@ -184,6 +214,7 @@ class ContainerClient {
         return "\(address)\(host):\(container)\(proto)"
       }
       details.networks = (config["networks"] as? [[String: Any]] ?? []).compactMap { $0["network"] as? String }
+      details.dnsDomain = ((config["dns"] as? [String: Any])?["domain"] as? String).flatMap { $0.isEmpty ? nil : $0 }
       details.addresses = details.networks.compactMap { addresses[$0] }
       details.binds = (config["mounts"] as? [[String: Any]] ?? []).compactMap { mount in
         guard (mount["type"] as? [String: Any])?["virtiofs"] != nil, let source = mount["source"] as? String,

@@ -68,6 +68,7 @@
         "               S: Run a command on the host",
         "Container      Enter: connect, confirming startup if stopped. G/F12: copy to/from the other local pane",
         "               In the list, Space: mark / C: Create / U: Up / S: Stop / D: Delete / F: choose Compose files for the list",
+        "               F12 in the list: switch the view, logs, delete images",
         "               O: return to the list (keep running)",
         "Enter          Folder: open it",
         "               .zip .tar.gz .tar.xz: show the contents like a folder (read-only)",
@@ -701,25 +702,41 @@
     delete: "Delete",
     not_created: "This container does not exist yet. Press C to create it.",
     no_action_targets: "No containers are eligible for this operation.",
-    bulk_start_confirm: "Start the following containers?",
     bulk_stop_confirm: "Stop the following containers?",
     bulk_delete_confirm: "Delete the following stopped containers?\nFiles inside these containers will be deleted.",
+    bulk_delete_images_confirm: "Delete the following images?",
     mark_count: "{side}: {count} containers marked",
-    // Container logs chosen with F12.
+    // The F12 menu.
+    menu: {
+      title: "Container",
+      title_for: "Container: {name}",
+    },
+    // View switch and logs chosen with F12.
     logs: {
-      title: "Logs of {name}",
       by_network: "by Network",
       by_status: "by Status",
       output: "Container output (container logs)",
       boot: "Boot log, OOM and so on (container logs --boot)",
       system: "Apple Container service log (last 5 minutes)",
     },
+    // "Delete images" in the F12 menu.
+    images: {
+      delete: "Delete images",
+      title: "Image to delete",
+      in_use: "{image} (in use: {names})",
+      none: "There are no images.",
+      delete_confirm: "Delete the image \"{image}\"?",
+      deleting: "Deleting the image…",
+      deleted: "Deleted {image}. {detail}",
+    },
     // Headings of the blocks in the list.
     section: {
-      current_up: "current (up)",
-      current_down: "current (down)",
-      other: "other",
+      up: "up",
+      down: "down",
+      no_container: "no container",
+      no_image: "no image",
       dockerfile: "Dockerfile",
+      containerfile: "Containerfile",
     },
     // 接続前に上の帯に出すコンテナの設定の名前。
     info: {

@@ -938,9 +938,30 @@ extension App {
     defer {
       close()
     }
+    // tar -v のように1秒に何千回も呼ばれることがあるので、描き直しは 0.1 秒に1回までにする（文言は毎回変える）。
+    let interval = Duration.milliseconds(100)
+    let clock = ContinuousClock()
+    var lastRender = clock.now - interval
+    // 間隔を空けて描き直す予定（最後の文言も出るように）。
+    var pendingRender: OneShotTimer?
     return try await action { [unowned self] next in
       dialog.message = next
-      requestRender()
+      if pendingRender != nil {
+        return
+      }
+      let elapsed = clock.now - lastRender
+      if elapsed >= interval {
+        lastRender = clock.now
+        requestRender()
+      } else {
+        let wait = interval - elapsed
+        let milliseconds = Int(wait.components.seconds * 1000 + wait.components.attoseconds / 1_000_000_000_000_000) + 1
+        pendingRender = OneShotTimer(milliseconds: milliseconds) {
+          pendingRender = nil
+          lastRender = clock.now
+          self.requestRender()
+        }
+      }
     }
   }
 }

@@ -268,7 +268,8 @@ nonisolated enum ArchiveFormat: CaseIterable, Sendable {
 }
 
 /// [paths] と、フォルダーならその中の項目の数（tar が入れる項目の数）。
-private func entryCount(_ paths: [String]) -> Int {
+/// 大きなフォルダー（iCloud Drive など）では時間がかかるので、メインスレッドでは呼ばない。
+private nonisolated func entryCount(_ paths: [String]) -> Int {
   paths.reduce(0) { count, path in
     var inside = 0
     if lstatPath(path).type == .directory, let walker = FileManager.default.enumerator(atPath: path) {
@@ -286,7 +287,8 @@ private func entryCount(_ paths: [String]) -> Int {
 func compressPaths(_ paths: [String], _ output: String, _ format: ArchiveFormat, progress: @escaping ArchiveProgress = { _, _, _ in })
   async throws
 {
-  let total = entryCount(paths)
+  // 数えている間も画面が止まらないよう、別のスレッドで数える。
+  let total = await Task.detached { entryCount(paths) }.value
   var args = ["-c", "-v"] + format.tarOptions + ["-f", output]
   for path in paths {
     let base = p.basename(path)

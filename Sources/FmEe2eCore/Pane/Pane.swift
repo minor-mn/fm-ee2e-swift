@@ -47,15 +47,19 @@ final class Entry {
 
 /// ローカルのファイルの所有者・グループ・パーミッション（ls -l の形）。
 struct Ownership {
-  init(_ owner: String, _ group: String, _ permissions: String) {
+  init(_ owner: String, _ group: String, _ permissions: String, linkTarget: String? = nil) {
     self.owner = owner
     self.group = group
     self.permissions = permissions
+    self.linkTarget = linkTarget
   }
 
   let owner: String
   let group: String
   let permissions: String
+
+  /// シンボリックリンクなら、指している先のパス。上の帯の Mode の右に出す。
+  let linkTarget: String?
 }
 
 /// マークした項目。フォルダーを移っても残る。
@@ -380,10 +384,23 @@ class Pane {
     visibleRows = rows
     let bg = Style()
     if let placeholder {
-      // 案内は窓の幅で折り返す。
-      let lines = placeholder.flatMap { wrap($0, width - 2) }
-      for i in 0..<min(lines.count, max(rows, 0)) {
-        screen.text(x + 1, y + i, lines[i], bg)
+      // 案内は窓の幅で折り返す。URL はクリックで開けるリンクにする（折り返しても1本の URL として開く）。
+      var row = 0
+      for paragraph in placeholder.flatMap({ $0.components(separatedBy: "\n") }) {
+        let links = TerminalModal.urls(in: paragraph)
+        var offset = 0
+        for line in wrap(paragraph, width - 2) {
+          if row >= rows {
+            return
+          }
+          var col = x + 1
+          for cell in cells(line) {
+            let link = links.first { $0.range.contains(offset) }?.url
+            col += screen.text(col, y + row, cell, link == nil ? bg : bg.copyWith(underline: true, link: link))
+            offset += cell.utf16.count
+          }
+          row += 1
+        }
       }
       return
     }
