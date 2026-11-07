@@ -362,10 +362,25 @@ final class DrivePane: PathPane {
   /// 次に試すタイマー。
   private var evictTimer: OneShotTimer?
 
-  /// アップロードした [paths] の手元のデータを外す（リモートには残る）。外せなかったものは、あとで試す。
+  /// [evictTimer] が待っている。
+  private var evictScheduled = false
+
+  /// アップロードした [paths] の手元のデータを外す（リモートには残る）。上がり終えるまでは外せないので、すぐには試さず
+  /// [evictInterval] 後にまとめて試す（小さいファイルを続けて送るとき、1つ置くたびに残り全部を試して遅くならないように）。
   func evictLater(_ paths: [String]) {
     toEvict.formUnion(paths)
-    Task { await evictPending() }
+    scheduleEvict()
+  }
+
+  private func scheduleEvict() {
+    if evictScheduled || toEvict.isEmpty {
+      return
+    }
+    evictScheduled = true
+    evictTimer = OneShotTimer(milliseconds: Self.evictInterval) { [weak self] in
+      self?.evictScheduled = false
+      Task { await self?.evictPending() }
+    }
   }
 
   private func evictPending() async {
@@ -382,12 +397,7 @@ final class DrivePane: PathPane {
       }
     }
     evicting = false
-    if !toEvict.isEmpty {
-      evictTimer?.cancel()
-      evictTimer = OneShotTimer(milliseconds: Self.evictInterval) { [weak self] in
-        Task { await self?.evictPending() }
-      }
-    }
+    scheduleEvict()
   }
 
   /// [dir] のフォルダーの、一覧の上に出す位置（「fm-ee2e / 復号した名前 / …」）。
@@ -401,7 +411,8 @@ final class DrivePane: PathPane {
     }
     let staged = p.join(temp, "payload")
     try await format!.encrypt(from: from, to: staged, key: key!)
-    try await movePath(staged, to)
+    // mv を起動するより速い（小さいファイルが多いと効く）。別のボリュームならコピーしてから消す。
+    try FileManager.default.moveItem(atPath: staged, toPath: to)
   }
 
   /// Drive の [from] を復号して、ローカルの [to] に置く。同じフォルダーの隠しファイルに復号し終えてから [to] の名前にする。

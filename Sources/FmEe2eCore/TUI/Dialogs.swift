@@ -151,6 +151,9 @@ final class InputField {
   /// 編集していなければ元の文字列（macOSのNFDの名前を保つ）。
   var value: String { edited ? cellList.joined() : original }
 
+  /// 開いてから中身を変えた。
+  var isEdited: Bool { edited }
+
   func clear() { set("") }
 
   /// 内容を [text] に置き換え、カーソルを末尾に置く。
@@ -355,7 +358,7 @@ final class InputDialog: Modal {
   override var focusedField: InputField? { field }
 
   /// ↑↓ でたどる入力の履歴（古い順）。readline の history-search-backward / forward と同じく、
-  /// カーソルより前の文字列で始まるものだけをたどる。
+  /// カーソルより前の文字列で始まるものだけをたどる。開いたときの文字のままなら、全部たどる。
   let history: [String]
   private var historyIndex: Int
 
@@ -476,7 +479,8 @@ final class InputDialog: Modal {
     } else {
       draft = field.value
       historyIndex = history.count
-      prefix = field.beforeCursor
+      // 開いたときの文字（Ctrl+L の今のフォルダーなど）のままなら、絞り込まずに全部たどる。
+      prefix = field.isEdited ? field.beforeCursor : ""
       searchPrefix = prefix
     }
     var i = historyIndex
@@ -487,7 +491,11 @@ final class InputDialog: Modal {
       }
       if i >= history.count {
         historyIndex = history.count
-        field.setAround(prefix, String(draft.dropFirst(prefix.count)))
+        if prefix.isEmpty {
+          field.set(draft)
+        } else {
+          field.setAround(prefix, String(draft.dropFirst(prefix.count)))
+        }
         return
       }
       if history[i].hasPrefix(prefix) && history[i] != field.value {
@@ -826,12 +834,19 @@ final class ProgressDialog: Modal {
   /// 出している文言。処理の途中で変えてよい（[withProgress] の update）。
   var message: String
 
-  override func preferredWidth(_ screen: Screen) -> Int { min(screen.width - 4, max(30, textWidth(message) + 6)) }
+  /// これまでに出した文言の、いちばん広い幅。文言が変わっても（進み具合の名前など）枠が縮んでがたつかないようにする。
+  private var widest = 0
+
+  override func preferredWidth(_ screen: Screen) -> Int {
+    widest = max(widest, textWidth(message))
+    return min(screen.width - 4, max(30, widest + 6))
+  }
 
   override func bodyHeight(_ innerWidth: Int) -> Int { 1 }
 
   override func drawBody(_ screen: Screen, _ x: Int, _ y: Int, _ innerWidth: Int) {
-    screen.text(x, y, message, background)
+    // 収まらない分は切る（長い名前で枠からはみ出さないように）。
+    screen.text(x, y, truncate(message, innerWidth), background)
   }
 
   override var hints: [(String, String)] { onEscape == nil ? [] : [("Esc", tr("dialogs.hint.abort"))] }

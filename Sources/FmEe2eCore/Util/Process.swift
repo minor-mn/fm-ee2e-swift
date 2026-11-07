@@ -229,6 +229,40 @@ final class RunningProcess {
   }
 }
 
+/// [runProcess] と同じく実行して終わるまで待ち、標準エラー出力を1行読めるたびに [onStderrLine] に（メインスレッドで）渡す
+/// （tar -v の進み具合を出すときなど）。呼んだ Task が取り消されたら、コマンドを止める。
+@discardableResult
+func runProcess(
+  _ executable: String,
+  _ arguments: [String],
+  environment: [String: String]? = nil,
+  onStderrLine: @escaping (String) -> Void
+) async throws -> ProcResult {
+  let process = try RunningProcess(executable, arguments, environment: environment)
+  var out = Data()
+  var err = Data()
+  var pending = Data()
+  process.onStdout = { out.append($0) }
+  process.onStderr = { chunk in
+    err.append(chunk)
+    pending.append(chunk)
+    while let newline = pending.firstIndex(of: 0x0a) {
+      let line = String(decoding: pending[pending.startIndex..<newline], as: UTF8.self)
+      pending.removeSubrange(pending.startIndex...newline)
+      onStderrLine(line)
+    }
+  }
+  process.closeStdin()
+  let pid = process.pid
+  let code = await withTaskCancellationHandler {
+    await process.exitCode
+  } onCancel: {
+    Darwin.kill(pid, SIGTERM)
+  }
+  await process.waitForOutput()
+  return ProcResult(exitCode: code, stdoutData: out, stderrData: err)
+}
+
 /// 外部コマンドを実行して、終わるまで待つ。
 /// 起動できなければ [ProcessError] を投げる。[input] は標準入力に書いて閉じる。
 @discardableResult

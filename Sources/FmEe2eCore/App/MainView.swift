@@ -19,7 +19,7 @@ final class MainView: View, Workspace {
     leftMode = config.leftTabs[0]
     preview = PreviewOverlay(app)
     transfers.onChange = { [unowned self] in
-      transfersPane?.refresh()
+      transfersPane?.needsRefresh = true
       app.requestRender()
     }
     transfers.onJobFinished = { [unowned self] job in transferFinished(job) }
@@ -50,11 +50,9 @@ final class MainView: View, Workspace {
     if modes.contains(.container), rightMode == .container { Task { await container.load() } }
     let gitFound = Task {
       if modes.contains(.git) && gitPane == nil {
+        // この Mac に git がなくても作る（接続先・コンテナの git は使えることがあり、あとで入れることもある）。
         let found = (try? await Git.locate()) ?? nil
-        gitLocated = true
-        if let found {
-          gitPane = GitPane(app, found)
-        }
+        gitPane = GitPane(app, found)
         app.requestRender()
       }
     }
@@ -87,14 +85,9 @@ final class MainView: View, Workspace {
   /// 右の窓に [mode] のタブを出すか（設定ファイルで true か）。
   private func uses(_ mode: RightMode) -> Bool { config.rightTabs.contains(mode) }
 
-  /// Tab で切り替える右の窓のタブ。git は見つかったときだけ。左が SSH のときは、ローカル・git・SSH だけ。
-  private var rightModes: [RightMode] {
-    config.rightTabs.filter { mode in
-      (mode != .git || gitPane != nil)
-        && (leftMode != .ssh || [.local, .git, .ssh, .container].contains(mode))
-        && (leftMode != .container || [.local, .git, .container].contains(mode))
-    }
-  }
+  /// Tab で切り替える右の窓のタブ（設定ファイルの right_tabs のとおり）。git は見つからなくても出し、その旨を出す。
+  /// 左のタブにはよらない（G・F12 の転送は組み合わせごとに [transferCommand] が決め、できない組み合わせでは出さない）。
+  private var rightModes: [RightMode] { config.rightTabs }
 
   /// 起動したときの右のタブ。ローカルが on ならローカル、off なら on のうち最初のタブ。
   private static func startMode(_ config: AppConfig) -> RightMode {
@@ -112,10 +105,11 @@ final class MainView: View, Workspace {
       return
     }
     let unusable = drive.state == .notInstalled || (drive.state == .ready && drive.error != nil)
-    if rightMode == .drive && unusable && gitPane != nil {
+    let localGitFound = gitPane?.localGit != nil
+    if rightMode == .drive && unusable && localGitFound {
       rightMode = .git
-    } else if rightMode == .git && gitPane == nil {
-      rightMode = rightModes.first ?? rightMode
+    } else if rightMode == .git && !localGitFound {
+      rightMode = rightModes.first { $0 != .git } ?? rightMode
     }
     if showGit {
       await showGitPane()
@@ -165,9 +159,6 @@ final class MainView: View, Workspace {
   /// git を探している間の右の窓。
   private let gitChecking: NoTabPane
 
-  /// git を探し終えた。
-  private var gitLocated = false
-
   /// 右の窓に git を出している。
   var showGit: Bool { rightMode == .git && gitPane != nil && !rightTransfers }
 
@@ -193,6 +184,18 @@ final class MainView: View, Workspace {
       rightTransfers = true
     }
     transfers.add(job)
+    app.requestRender()
+  }
+
+  func leaveTransfers() {
+    if rightActive {
+      rightTransfers = false
+      if showGit {
+        Task { await showGitPane() }
+      }
+    } else {
+      leftTransfers = false
+    }
     app.requestRender()
   }
 
@@ -241,10 +244,11 @@ final class MainView: View, Workspace {
       return transfersPane
     }
     if !rightModes.contains(rightMode) {
-      return rightMode == .git && !gitLocated ? gitChecking : noTab
+      return noTab
     }
     switch rightMode {
-    case .git: return gitPane!
+    // git を探している間は「確認中」。見つからなかったときは、git の窓が「有効な Git が未導入」を出す。
+    case .git: return gitPane ?? gitChecking
     case .ssh: return ssh
     case .container: return container
     case .drive: return drive
@@ -640,7 +644,7 @@ final class MainView: View, Workspace {
   }
 
   /// 左の窓を、設定ファイルの left_tabs の順に切り替える（Shift+Tab）。0 のタブは飛ばす。
-  /// 右に左のタブで使えないタブを出していれば、右をローカル（off なら使えるうち最初のタブ）にする。
+  /// 右のタブはそのまま（右に出せないタブを出していれば、ローカル（off なら使えるうち最初のタブ）にする）。
   private func switchLeft() {
     // 転送タブがあれば最後に入れる（nil）。
     let cycle: [LeftMode?] = config.leftTabs.map { $0 } + (transfersPane == nil ? [] : [nil])

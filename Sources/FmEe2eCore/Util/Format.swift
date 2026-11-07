@@ -60,7 +60,8 @@ nonisolated func parseDf(_ output: String) -> DiskUsage? {
 
 /// [paths] の手元のデータだけを外す（Google ドライブ for デスクトップなどの File Provider の項目。リモートには残り、
 /// 開けばまたダウンロードされる）。Finder の「オフラインで使用可能」を外すのと同じ。外せなかったパスを返す。
-func evictLocalCopies(_ paths: [String]) async -> [String] {
+/// 1つずつ File Provider に問い合わせるので、メインスレッドを止めないよう別のスレッドで動かす。
+nonisolated func evictLocalCopies(_ paths: [String]) async -> [String] {
   if paths.isEmpty {
     return []
   }

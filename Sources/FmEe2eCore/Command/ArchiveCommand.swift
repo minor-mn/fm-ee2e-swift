@@ -15,8 +15,10 @@ class CompressCommand: Command {
   /// 圧縮先のフォルダーにある名前。
   func existing(_ c: CommandContext) async throws -> Set<String> { fatalError("existing") }
 
-  /// [targets] を、圧縮先のフォルダーの [name] に [format] で圧縮する。
-  func compress(_ c: CommandContext, _ targets: [Mark], _ name: String, _ format: ArchiveFormat) async throws {
+  /// [targets] を、圧縮先のフォルダーの [name] に [format] で圧縮する。項目を入れるたびに [progress] に知らせる（知らせられなければ呼ばない）。
+  func compress(
+    _ c: CommandContext, _ targets: [Mark], _ name: String, _ format: ArchiveFormat, progress: @escaping ArchiveProgress
+  ) async throws {
     fatalError("compress")
   }
 
@@ -50,7 +52,11 @@ class CompressCommand: Command {
         return
       }
       do {
-        try await app.withProgress(tr("archive_command.compressing")) { try await self.compress(c, targets, name, format) }
+        try await app.withUpdatingProgress(tr("archive_command.compressing")) { update in
+          try await self.compress(c, targets, name, format) { done, total, item in
+            update(tr("archive_command.compressing_count", ["done": done, "total": total, "name": item]))
+          }
+        }
         pane.marks.clear()
       } catch {
         await app.showError(error)
@@ -70,9 +76,11 @@ final class LocalCompress: CompressCommand {
 
   override func existing(_ c: CommandContext) async throws -> Set<String> { try await dirNames((c.pane as! LocalPane).dir) }
 
-  override func compress(_ c: CommandContext, _ targets: [Mark], _ name: String, _ format: ArchiveFormat) async throws {
+  override func compress(
+    _ c: CommandContext, _ targets: [Mark], _ name: String, _ format: ArchiveFormat, progress: @escaping ArchiveProgress
+  ) async throws {
     let pane = c.pane as! LocalPane
-    try await compressPaths(targets.map { pane.pathOfMark($0) }, p.join(pane.dir, name), format)
+    try await compressPaths(targets.map { pane.pathOfMark($0) }, p.join(pane.dir, name), format, progress: progress)
   }
 }
 
@@ -90,14 +98,16 @@ final class SshCompress: CompressCommand {
 
   override func existing(_ c: CommandContext) async throws -> Set<String> { (c.pane as! SshPane).names }
 
-  override func compress(_ c: CommandContext, _ targets: [Mark], _ name: String, _ format: ArchiveFormat) async throws {
+  override func compress(
+    _ c: CommandContext, _ targets: [Mark], _ name: String, _ format: ArchiveFormat, progress: @escaping ArchiveProgress
+  ) async throws {
     let pane = c.pane as! SshPane
     try await pane.ssh!.compress(targets.map { pane.pathOfMark($0) }, PathContext.posix.join(pane.dir, name), format)
   }
 }
 
-/// 開いた圧縮ファイル。中の項目と、丸ごと展開するしかた（引数は keepExisting）。
-typealias OpenedArchive = (items: [ArchiveItem], extractAll: (_ keepExisting: Bool) async throws -> Void)
+/// 開いた圧縮ファイル。中の項目と、丸ごと展開するしかた（引数は keepExisting と、項目を展開するたびに知らせる先）。
+typealias OpenedArchive = (items: [ArchiveItem], extractAll: (_ keepExisting: Bool, _ progress: @escaping ArchiveProgress) async throws -> Void)
 
 /// 対象の圧縮ファイルを、開いているフォルダーに展開する（U）。
 /// 流れはここに書き、読み方と展開のしかたは、タブごとの継承クラスに書く。
@@ -153,7 +163,11 @@ class ExtractCommand: Command {
         }
         keepExisting = choice == 1
       }
-      try await app.withProgress(tr("archive_command.extracting", ["name": entry.name])) { try await archive.extractAll(keepExisting) }
+      try await app.withUpdatingProgress(tr("archive_command.extracting", ["name": entry.name])) { update in
+        try await archive.extractAll(keepExisting) { done, total, item in
+          update(tr("archive_command.extracting_count", ["archive": entry.name, "done": done, "total": total, "name": item]))
+        }
+      }
     } catch {
       await app.showError(error)
     }
@@ -173,8 +187,8 @@ final class LocalExtract: ExtractCommand {
     let items = try await listArchive(archive)
     return (
       items: items,
-      extractAll: { keepExisting in
-        try await extractArchive(archive, items, pane.dir, keepExisting: keepExisting)
+      extractAll: { keepExisting, progress in
+        try await extractArchive(archive, items, pane.dir, keepExisting: keepExisting, progress: progress)
       }
     )
   }
@@ -191,7 +205,8 @@ final class SshExtract: ExtractCommand {
     let archive = try await RemoteArchive.open(pane.ssh!, pane.pathOfMark(target))
     return (
       items: archive.items,
-      extractAll: { keepExisting in try await archive.extractAll(pane.dir, keepExisting: keepExisting) }
+      // 接続先では進み具合を読まない（「処理中」だけ）。
+      extractAll: { keepExisting, _ in try await archive.extractAll(pane.dir, keepExisting: keepExisting) }
     )
   }
 }
