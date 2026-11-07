@@ -3,7 +3,8 @@ import Foundation
 
 /// Google Drive との転送（G・F12）。左のローカルと右の Google Drive（アプリ専用のフォルダー）の間で、
 /// 名前とファイルの中身を暗号化・復号しながらコピーする。フォルダーは中身ごとたどり、送り先に同じ名前のフォルダーがあれば
-/// その中に入れる。同名のファイルは確かめ、上書きでは今あるものをゴミ箱に移す。失敗した項目は最後にまとめてエラーで出す。
+/// その中に入れる。同名のファイルは始める前にまとめて確かめ、上書きでは今あるものをゴミ箱に移す。
+/// 送るのは裏で（転送タブ）。フォルダーの中のファイルも1つずつ項目にする。
 /// 流れはここに書き、向きによる違いは継承クラスに書く。
 class DriveTransferCommand: Command {
   override var label: String { "Drive G" }
@@ -16,15 +17,13 @@ class DriveTransferCommand: Command {
   /// 確かめる小窓の本文。[label] は転送する項目（「「名前」」か「N項目」）。
   func message(_ c: CommandContext, _ label: String) -> String { fatalError("message") }
 
-  /// [mark] を送る。送り先の同名は [conflicts] で確かめ、送るファイルごとに [update] で知らせ、失敗は [errors] に足す。
-  func send(
-    _ c: CommandContext,
-    _ mark: Mark,
-    _ conflicts: Conflicts,
-    _ update: (String) -> Void,
-    _ errors: inout [String]
-  ) async throws {
-    fatalError("send")
+  /// 送り先の窓と、転送タブの見出しに出す送り先。
+  func destination(_ c: CommandContext) -> Pane { fatalError("destination") }
+  func destDisplay(_ c: CommandContext) -> String { fatalError("destDisplay") }
+
+  /// [mark] を送る項目を [items] に足す。送り先の同名は [conflicts] で確かめる。[group] は対象の番号。
+  func plan(_ c: CommandContext, _ mark: Mark, _ group: Int, _ conflicts: Conflicts, _ items: inout [TransferItem]) async throws {
+    fatalError("plan")
   }
 
   override func run(_ c: CommandContext) async {
@@ -51,30 +50,65 @@ class DriveTransferCommand: Command {
       return
     }
     let conflicts = Conflicts { path in await askConflict(app, path) }
-    var errors: [String] = []
+    var items: [TransferItem] = []
     do {
-      try await app.withUpdatingProgress(tr("transfer.in_progress", ["title": title])) { update in
-        for mark in targets {
-          let before = errors.count
-          try await send(c, mark, conflicts, { name in update(tr("transfer.in_progress_item", ["title": self.title, "name": name])) }, &errors)
-          // 失敗した項目のマークは残す。
-          if errors.count == before {
-            pane.marks.removeAll { _, m in m.parent == mark.parent && m.entry.name == mark.entry.name }
+      try await app.withProgress(tr("transfers.preparing")) {
+        for (index, mark) in targets.enumerated() {
+          do {
+            try await plan(c, mark, index, conflicts, &items)
+          } catch is PlanCancelled {
+            throw PlanCancelled()
+          } catch {
+            // 調べられなかった対象は、失敗した項目として転送タブに出す。
+            items.append(TransferItem(mark.entry.name, isDir: mark.entry.isDir, group: index) { throw error })
           }
         }
       }
-    } catch is PlanCancelled {
-      // 途中で中止。済んだ分はそのまま。
     } catch {
-      await app.showError(error)
+      // PlanCancelled（同名の確認で中止）。
       return
     }
-    if !errors.isEmpty {
-      await app.showError(errors.joined(separator: "\n"))
+    if items.isEmpty {
+      return
     }
-    async let a: Void = local.load()
-    async let b: Void = drive.load()
-    _ = await (a, b)
+    let job = TransferJob(tr("transfers.job", ["title": title, "dest": destDisplay(c)]), items) { job in
+      // 全部送れた対象のマークを外す（失敗・中止した分は残す）。
+      for (index, mark) in targets.enumerated() where job.groupDone(index) {
+        pane.marks.removeAll { _, m in m.parent == mark.parent && m.entry.name == mark.entry.name }
+      }
+      async let a: Void = local.load()
+      async let b: Void = drive.load()
+      _ = await (a, b)
+    }
+    c.workspace.startTransfer(job, to: destination(c))
+  }
+}
+
+/// Drive の送り先のフォルダー。まだないものは、最初に中へ置くときに作る（名前を暗号化して）。
+private final class DriveFolder {
+  init(path: String) {
+    self.path = path
+    parent = nil
+    name = ""
+  }
+
+  init(parent: DriveFolder, name: String) {
+    path = nil
+    self.parent = parent
+    self.name = name
+  }
+
+  private var path: String?
+  private let parent: DriveFolder?
+  private let name: String
+
+  func resolve(_ drive: DrivePane) async throws -> String {
+    if let path {
+      return path
+    }
+    let made = try await drive.place(try await parent!.resolve(drive), name, isFolder: true) { try createDirectory($0) }
+    path = made
+    return made
   }
 }
 
@@ -89,78 +123,84 @@ final class DriveUpload: DriveTransferCommand {
     tr("transfer.drive_upload_confirm", ["label": label, "location": c.workspace.drive.location])
   }
 
-  override func send(
-    _ c: CommandContext,
-    _ mark: Mark,
-    _ conflicts: Conflicts,
-    _ update: (String) -> Void,
-    _ errors: inout [String]
-  ) async throws {
+  override func destination(_ c: CommandContext) -> Pane { c.workspace.drive }
+
+  override func destDisplay(_ c: CommandContext) -> String { "Google Drive / \(c.workspace.drive.location)" }
+
+  override func plan(_ c: CommandContext, _ mark: Mark, _ group: Int, _ conflicts: Conflicts, _ items: inout [TransferItem]) async throws {
     let drive = c.workspace.drive
-    try await DriveUpload.upload(
-      drive,
-      c.workspace.local.pathOfMark(mark),
-      mark.entry.isDir,
-      drive.dirPath,
-      conflicts,
-      update,
-      &errors
+    let dest = drive.dirPath
+    try await Self.plan(
+      drive, c.workspace.local.pathOfMark(mark), mark.entry.isDir, DriveFolder(path: dest), try await drive.itemsIn(dest),
+      await drive.displayOf(dest), mark.entry.name, group, conflicts, &items
     )
   }
 
-  /// ローカルの [from] を、Drive の [dest] の中へ。
-  private static func upload(
+  /// ローカルの [from] を、Drive のフォルダー [folder]（今ある項目は [existing]、見せる位置は [display]）の中へ送る項目。
+  /// [relative] は転送タブに出す名前。
+  private static func plan(
     _ drive: DrivePane,
     _ from: String,
     _ isDir: Bool,
-    _ dest: String,
+    _ folder: DriveFolder,
+    _ existing: [String: LocalSource],
+    _ display: String,
+    _ relative: String,
+    _ group: Int,
     _ conflicts: Conflicts,
-    _ update: (String) -> Void,
-    _ errors: inout [String]
+    _ items: inout [TransferItem]
   ) async throws {
     let name = p.basename(from)
-    do {
-      let items = try await drive.itemsIn(dest)
-      let existing = items[name]
-      if isDir {
-        let dir: String
-        if let existing = existing as? LocalDir {
-          dir = existing.directory
-        } else {
-          dir = try await drive.place(dest, name, isFolder: true) { try createDirectory($0) }
-        }
-        for path in try listDirectory(from) {
-          if let source = localSourceOf(path, statPath(path)) {
-            try await upload(drive, path, source is LocalDir, dir, conflicts, update, &errors)
-          }
-        }
-        return
+    if isDir {
+      let child: DriveFolder
+      var childExisting: [String: LocalSource] = [:]
+      if let found = existing[name] as? LocalDir {
+        // 同じ名前のフォルダーがあれば、その中に入れる。
+        child = DriveFolder(path: found.directory)
+        childExisting = try await drive.itemsIn(found.directory)
+      } else {
+        child = DriveFolder(parent: folder, name: name)
+        items.append(TransferItem(relative, isDir: true, group: group) { _ = try await child.resolve(drive) })
       }
-      var target = name
-      var replaced: String?
-      if let existing = existing as? LocalFile {
-        switch try await conflicts.ask("Google Drive / \(await drive.displayOf(dest)) / \(name)") {
-        case .skip:
-          return
-        case .overwrite:
-          replaced = existing.file
-        case .rename:
-          target = uniqueName(name, Set(items.keys))
+      let paths = try listDirectory(from).sorted { compareCodeUnits($0, $1) < 0 }
+      for path in paths {
+        if let source = localSourceOf(path, statPath(path)) {
+          try await plan(
+            drive, path, source is LocalDir, child, childExisting, "\(display) / \(name)", "\(relative)/\(p.basename(path))",
+            group, conflicts, &items
+          )
         }
       }
-      update(name)
-      let to = try await drive.place(dest, target, isFolder: false) { try await drive.encryptFile(from, $0) }
-      // 新しいものを置き終えてから、上書きされる側をゴミ箱に移す。
-      if let replaced {
-        try await drive.trash(replaced)
-      }
-      // 手元には残さない（Drive に上がり終えたら外す）。
-      drive.evictLater([to])
-    } catch is PlanCancelled {
-      throw PlanCancelled()
-    } catch {
-      errors.append("\(name): \(errorMessage(error))")
+      return
     }
+    var target = name
+    var replaced: String?
+    if let found = existing[name] as? LocalFile {
+      switch try await conflicts.ask("Google Drive / \(display) / \(name)") {
+      case .skip:
+        return
+      case .overwrite:
+        replaced = found.file
+      case .rename:
+        target = uniqueName(name, Set(existing.keys))
+      }
+    }
+    let size = statPath(from).size
+    // 置き終えたもの。やり直すときは、置き終えていれば残りの手順（上書きされる側の片付け）だけを行う。
+    var placed: String?
+    items.append(
+      TransferItem(relative, size: size, group: group) {
+        if placed == nil {
+          let dir = try await folder.resolve(drive)
+          placed = try await drive.place(dir, target, isFolder: false) { try await drive.encryptFile(from, $0) }
+        }
+        // 新しいものを置き終えてから、上書きされる側をゴミ箱に移す。
+        if let replaced, lstatPath(replaced).type != .notFound {
+          try await drive.trash(replaced)
+        }
+        // 手元には残さない（Drive に上がり終えたら外す）。
+        drive.evictLater([placed!])
+      })
   }
 }
 
@@ -174,82 +214,80 @@ final class DriveDownload: DriveTransferCommand {
     tr("transfer.drive_download_confirm", ["label": label, "dir": c.workspace.local.dir])
   }
 
-  override func send(
-    _ c: CommandContext,
-    _ mark: Mark,
-    _ conflicts: Conflicts,
-    _ update: (String) -> Void,
-    _ errors: inout [String]
-  ) async throws {
-    let drive = c.workspace.drive
-    try await DriveDownload.download(
-      drive,
-      drive.pathOfMark(mark),
-      mark.entry.name,
-      mark.entry.isDir,
-      c.workspace.local.dir,
-      conflicts,
-      update,
-      &errors
+  override func destination(_ c: CommandContext) -> Pane { c.workspace.local }
+
+  override func destDisplay(_ c: CommandContext) -> String { c.workspace.local.dir }
+
+  override func plan(_ c: CommandContext, _ mark: Mark, _ group: Int, _ conflicts: Conflicts, _ items: inout [TransferItem]) async throws {
+    let dest = c.workspace.local.dir
+    try await Self.plan(
+      c.workspace.drive, c.workspace.drive.pathOfMark(mark), mark.entry.name, mark.entry.isDir, mark.entry.size, dest,
+      try await dirNames(dest), mark.entry.name, group, conflicts, &items
     )
   }
 
-  /// Drive の [from]（一覧での名前は [name]）を、ローカルの [dest] の中へ。
-  private static func download(
+  /// Drive の [from]（一覧での名前は [name]）を、ローカルの [dest]（今ある名前は [existing]）の中へ送る項目。
+  /// [relative] は転送タブに出す名前。
+  private static func plan(
     _ drive: DrivePane,
     _ from: String,
     _ name: String,
     _ isDir: Bool,
+    _ size: Int?,
     _ dest: String,
+    _ existing: Set<String>,
+    _ relative: String,
+    _ group: Int,
     _ conflicts: Conflicts,
-    _ update: (String) -> Void,
-    _ errors: inout [String]
+    _ items: inout [TransferItem]
   ) async throws {
-    do {
-      let to = p.join(dest, name)
-      if isDir {
-        // 同じ名前のフォルダーがあれば、その中に入れる。
-        if !directoryExists(to) {
-          try createDirectory(to)
-        }
-        let items = try await drive.itemsIn(from)
-        for child in items.keys {
-          let source = items[child]!
-          let path: String
-          switch source {
-          case let file as LocalFile: path = file.file
-          case let dir as LocalDir: path = dir.directory
-          default: fatalError("LocalSource")
-          }
-          try await download(drive, path, child, source is LocalDir, to, conflicts, update, &errors)
-        }
-        return
+    let to = p.join(dest, name)
+    if isDir {
+      // 同じ名前のフォルダーがあれば、その中に入れる。
+      let exists = directoryExists(to)
+      if !exists {
+        items.append(
+          TransferItem(relative, isDir: true, group: group) {
+            if !directoryExists(to) {
+              try createDirectory(to)
+            }
+          })
       }
-      var target = to
-      let existing = try await dirNames(dest)
-      if existing.contains(name) {
-        switch try await conflicts.ask(to) {
-        case .skip:
-          return
-        case .overwrite:
-          break
-        case .rename:
-          target = p.join(dest, uniqueName(name, existing))
+      let childExisting = exists ? try await dirNames(to) : []
+      let children = try await drive.itemsIn(from)
+      for child in children.keys.sorted(by: { compareCodeUnits($0, $1) < 0 }) {
+        let source = children[child]!
+        let path: String
+        switch source {
+        case let file as LocalFile: path = file.file
+        case let dir as LocalDir: path = dir.directory
+        default: fatalError("LocalSource")
         }
+        try await plan(
+          drive, path, child, source is LocalDir, (source as? LocalFile)?.size, to, childExisting, "\(relative)/\(child)",
+          group, conflicts, &items
+        )
       }
-      update(name)
-      try await drive.decryptFile(from, target)
-    } catch is PlanCancelled {
-      throw PlanCancelled()
-    } catch {
-      errors.append("\(name): \(errorMessage(error))")
+      return
     }
+    var target = to
+    if existing.contains(name) {
+      switch try await conflicts.ask(to) {
+      case .skip:
+        return
+      case .overwrite:
+        break
+      case .rename:
+        target = p.join(dest, uniqueName(name, existing))
+      }
+    }
+    items.append(TransferItem(relative, size: size, group: group) { try await drive.decryptFile(from, target) })
   }
 }
 
 /// フォルダーどうしのコピー（G・F12）。左のローカルと、右のローカル・iCloud Drive の間。
-/// 送り先に同名があれば確かめ、上書きでは今あるものをゴミ箱に移してから置く。転送の間は何件目を送っているかを
-/// 「処理中」の小窓に出し、失敗した項目は最後にまとめてエラーで出す。流れはここに書き、向きと右のタブによる違いは継承クラスに書く。
+/// 送り先に同名があれば始める前に確かめ、上書きでは今あるものをゴミ箱に移してから置く。送るのは裏で（転送タブ）、
+/// 失敗した項目は転送タブにその理由を出す。流れはここに書き、向きと右のタブによる違いは継承クラスに書く。
 class FolderCopyCommand: Command {
   override var writes: Bool { true }
 
@@ -320,27 +358,33 @@ class FolderCopyCommand: Command {
       // PlanCancelled（途中で中止）。
       return
     }
-    var errors: [String] = []
-    await app.withUpdatingProgress(tr("transfer.in_progress", ["title": title])) { update in
-      for (index, job) in jobs.enumerated() {
-        let name = job.mark.entry.name
-        update(tr("transfer.in_progress_count", ["title": title, "index": index + 1, "total": jobs.count, "name": name]))
-        do {
-          if job.overwrite {
-            try await moveToTrash(job.to)
-          }
-          try await copyPath(from.pathOfMark(job.mark), job.to)
-          // スキップ・失敗した項目のマークは残す。
-          pane.marks.removeAll { _, mark in mark.parent == job.mark.parent && mark.entry.name == name }
-        } catch {
-          errors.append("\(name): \(errorMessage(error))")
+    if jobs.isEmpty {
+      return
+    }
+    // 送るのは裏で（転送タブ）。
+    let items = jobs.enumerated().map { index, job in
+      let name = job.mark.entry.name
+      let source = from.pathOfMark(job.mark)
+      return TransferItem(name, isDir: job.mark.entry.isDir, size: job.mark.entry.size, group: index) {
+        // やり直しのときは、前にゴミ箱へ移し終えていることがある。
+        if job.overwrite && lstatPath(job.to).type != .notFound {
+          try await moveToTrash(job.to)
         }
+        do {
+          try await copyPath(source, job.to)
+        } catch {
+          // 途中まで書いたもの（止めたときなど）は消す。今あったものは先にゴミ箱に移しているので、これは新しく書いたもの。
+          if lstatPath(job.to).type != .notFound {
+            try? FileManager.default.removeItem(atPath: job.to)
+          }
+          throw error
+        }
+        // スキップ・失敗した項目のマークは残す。
+        pane.marks.removeAll { _, mark in mark.parent == job.mark.parent && mark.entry.name == name }
       }
     }
-    if !errors.isEmpty {
-      await app.showError(errors.joined(separator: "\n"))
-    }
-    await to.load()
+    let job = TransferJob(tr("transfers.job", ["title": title, "dest": to.dir]), items) { _ in await to.load() }
+    c.workspace.startTransfer(job, to: to)
   }
 }
 
@@ -421,9 +465,9 @@ final class LocalCopyToLeft: LocalCopyCommand {
   override func dest(_ c: CommandContext) -> LocalPane { c.workspace.local }
 }
 
-/// scp での転送（G・F12）。左のローカルと SSH の接続先の間か、左の SSH の接続先と、そこからつないだ右の SSH の接続先の間。転送の間は何件目を送っているかを「処理中」の小窓に出し、
-/// 失敗した項目は最後にまとめてエラーで出す（scp は最初の接続の上で動くので、何も聞いてこない）。
-/// 送り先に同名があれば確かめ、送り先と同じ場所の一時フォルダーにいったん送ってから置き換える
+/// scp での転送（G・F12）。左のローカルと SSH の接続先の間か、左の SSH の接続先と、そこからつないだ右の SSH の接続先の間。
+/// 送るのは裏で（転送タブ）、失敗した項目は転送タブにその理由を出す（scp は最初の接続の上で動くので、何も聞いてこない）。
+/// 送り先に同名があれば始める前に確かめ、送り先と同じ場所の一時フォルダーにいったん送ってから置き換える
 /// （同名のフォルダーへ直接 scp すると入れ子になるため）。流れはここに書き、向きによる違いは継承クラスに書く。
 class ScpCommand: Command {
   override var label: String { "SCP G" }
@@ -458,6 +502,9 @@ class ScpCommand: Command {
 
   /// 送り先のフォルダーの名前（表示後に作られたもの・隠しファイルを含む）。
   func destNames(_ c: CommandContext, _ remote: Ssh) async throws -> Set<String> { fatalError("destNames") }
+
+  /// 送り先の窓（転送タブに切り替える側）。
+  func destPane(_ c: CommandContext) -> Pane { fatalError("destPane") }
 
   /// 送り先と同じファイルシステムに一時フォルダーを作る。
   func createStaging(_ c: CommandContext, _ remote: Ssh) async throws -> String { fatalError("createStaging") }
@@ -530,64 +577,81 @@ class ScpCommand: Command {
     if jobs.isEmpty {
       return
     }
-    var errors: [String] = []
-    await app.withUpdatingProgress(tr("transfer.in_progress", ["title": title])) { update in
-      for (index, job) in jobs.enumerated() {
-        let name = job.mark.entry.name
-        update(tr("transfer.in_progress_count", ["title": title, "index": index + 1, "total": jobs.count, "name": name]))
-        var staging: String?
-        var cleanStaging = true
-        do {
-          staging = try await createStaging(c, remote)
-          let payload = destContext.join(staging!, "payload")
-          let previous = destContext.join(staging!, "previous")
-          let result = try await transfer(remote, job.from, payload)
-          if result.exitCode != 0 {
-            let message = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-            errors.append("\(name): \(message.isEmpty ? exitStatusText(result.exitCode) : message)")
-          } else {
-            let exists = try await destExists(remote, job.to)
-            if exists && !job.overwrite {
-              throw SshException(tr("transfer.created_during_transfer"))
-            }
-            if exists {
-              try await destMove(remote, job.to, previous)
-            }
-            do {
-              try await destMove(remote, payload, job.to)
-            } catch {
-              let moveError = error
-              if exists {
-                do {
-                  try await destMove(remote, previous, job.to)
-                } catch {
-                  cleanStaging = false
-                  throw SshException(tr("transfer.replace_failed", ["previous": previous]))
-                }
-              }
-              throw moveError
-            }
-            // スキップ・失敗した項目のマークは残す。
-            pane.marks.removeAll { _, mark in mark.parent == job.mark.parent && mark.entry.name == name }
-          }
-        } catch {
-          errors.append("\(name): \(errorMessage(error))")
-        }
-        if let staging, cleanStaging {
-          do {
-            try await removeStaging(remote, staging)
-          } catch {
-            errors.append(tr("transfer.staging_remove_failed", ["staging": staging, "error": errorMessage(error)]))
-          }
-        }
+    // 送るのは裏で（転送タブ）。
+    let items = jobs.enumerated().map { index, job in
+      let name = job.mark.entry.name
+      return TransferItem(name, isDir: job.mark.entry.isDir, size: job.mark.entry.size, group: index) { [self] in
+        try await send(c, remote, from: job.from, to: job.to, overwrite: job.overwrite)
+        // スキップ・失敗した項目のマークは残す。
+        pane.marks.removeAll { _, mark in mark.parent == job.mark.parent && mark.entry.name == name }
       }
     }
-    if !errors.isEmpty {
-      await app.showError(errors.joined(separator: "\n"))
+    let job = TransferJob(tr("transfers.job", ["title": title, "dest": destDisplay(remote, dir)]), items) { _ in
+      async let a: Void = local.load()
+      async let b: Void = ssh.load()
+      _ = await (a, b)
     }
-    async let a: Void = local.load()
-    async let b: Void = ssh.load()
-    _ = await (a, b)
+    c.workspace.startTransfer(job, to: destPane(c))
+  }
+
+  /// 転送の後片付けに失敗して、一時フォルダーを残した。
+  private struct StagingKept: Error, CustomStringConvertible {
+    let description: String
+  }
+
+  /// [from] を、送り先と同じ場所の一時フォルダーに送ってから [to] に置く。止められたら、一時フォルダーを消して止める。
+  private func send(_ c: CommandContext, _ remote: Ssh, from: String, to: String, overwrite: Bool) async throws {
+    let staging = try await createStaging(c, remote)
+    var failure: (any Error)?
+    var cleanStaging = true
+    do {
+      let payload = destContext.join(staging, "payload")
+      let previous = destContext.join(staging, "previous")
+      let result = try await transfer(remote, from, payload)
+      try Task.checkCancellation()
+      if result.exitCode != 0 {
+        let message = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+        throw SshException(message.isEmpty ? exitStatusText(result.exitCode) : message)
+      }
+      // 置き換えは、止められても途中でやめない（元のデータを失わないように）。
+      try await uncancelled { [self] in
+        let exists = try await destExists(remote, to)
+        if exists && !overwrite {
+          throw SshException(tr("transfer.created_during_transfer"))
+        }
+        if exists {
+          try await destMove(remote, to, previous)
+        }
+        do {
+          try await destMove(remote, payload, to)
+        } catch {
+          let moveError = error
+          if exists {
+            do {
+              try await destMove(remote, previous, to)
+            } catch {
+              throw StagingKept(description: tr("transfer.replace_failed", ["previous": previous]))
+            }
+          }
+          throw moveError
+        }
+      }
+    } catch let error as StagingKept {
+      cleanStaging = false
+      failure = error
+    } catch {
+      failure = error
+    }
+    if cleanStaging {
+      do {
+        try await uncancelled { [self] in try await removeStaging(remote, staging) }
+      } catch {
+        failure = failure ?? SshException(tr("transfer.staging_remove_failed", ["staging": staging, "error": errorMessage(error)]))
+      }
+    }
+    if let failure {
+      throw failure
+    }
   }
 }
 
@@ -600,6 +664,8 @@ class LocalScp: ScpCommand {
   override var destContext: PathContext { .posix }
 
   override func destDir(_ c: CommandContext) -> String { remotePane(c).dir }
+
+  override func destPane(_ c: CommandContext) -> Pane { remotePane(c) }
 
   override func sourcePath(_ c: CommandContext, _ mark: Mark) -> String { (near(c) as! PathPane).pathOfMark(mark) }
 
@@ -638,6 +704,8 @@ class SshScp: ScpCommand {
   private func dest(_ c: CommandContext) -> LocalPane { near(c) as! LocalPane }
 
   override func destDir(_ c: CommandContext) -> String { dest(c).dir }
+
+  override func destPane(_ c: CommandContext) -> Pane { near(c) }
 
   override func sourcePath(_ c: CommandContext, _ mark: Mark) -> String { remotePane(c).pathOfMark(mark) }
 
@@ -705,6 +773,8 @@ final class RightSshScp: ScpCommand {
   override var destContext: PathContext { .posix }
 
   override func destDir(_ c: CommandContext) -> String { c.workspace.sshLeft.dir }
+
+  override func destPane(_ c: CommandContext) -> Pane { near(c) }
 
   override func sourcePath(_ c: CommandContext, _ mark: Mark) -> String { c.workspace.ssh.pathOfMark(mark) }
 

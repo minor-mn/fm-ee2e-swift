@@ -254,7 +254,13 @@ func runProcess(
   } else {
     process.closeStdin()
   }
-  let code = await process.exitCode
+  // 呼んだ Task が取り消されたら（転送の中止など）、コマンドを止める。
+  let pid = process.pid
+  let code = await withTaskCancellationHandler {
+    await process.exitCode
+  } onCancel: {
+    Darwin.kill(pid, SIGTERM)
+  }
   await process.waitForOutput()
   return ProcResult(exitCode: code, stdoutData: out, stderrData: err)
 }

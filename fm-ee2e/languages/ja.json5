@@ -90,6 +90,8 @@
         "               (右が git status のときは Git コマンド。左で押すと左のファイルに",
         "                git add / restore / rm を、ファイルの状態に合わせて出す)",
         "               カーソルとマークの候補が複数ならマークだけ、1件ならカーソル",
+        "               G の転送は裏で動く。転送を始めると、転送先の側が転送タブ（転送の一覧）に切り替わる",
+        "               転送タブの G / F12 は、カーソル (マークがあればマーク) の転送・項目の cancel・retry をメニューに出す",
         "D / Del        削除 (ゴミ箱へ移動。SSH は rm で削除)",
         "A              権限変更",
         "S              シェル (コマンドを入れて枠の中で実行。終わったら Enter で戻る)",
@@ -182,13 +184,10 @@
     // Google Drive
     drive_unavailable: "Google Driveを使えません。",
     drive_loading: "Google Driveのフォルダーを読み込み中です。",
-    in_progress: "{title}中…",
-    in_progress_item: "{title}中… {name}",
     upload: "アップロード",
     drive_upload_confirm: "{label}を暗号化して Google Drive の {location} にアップロードします。",
     download: "ダウンロード",
     drive_download_confirm: "{label}を復号して {dir} にダウンロードします。",
-    in_progress_count: "{title}中（{index}/{total}）{name}",
     // iCloud Drive
     icloud_unavailable: "iCloud Driveは使えません。",
     icloud_loading: "iCloud Driveのフォルダーを読み込み中です。",
@@ -205,6 +204,19 @@
     staging_remove_failed: "一時フォルダー {staging} を削除できません: {error}",
     copy_right: "右へコピー",
     copy_left: "左へコピー",
+  },
+  // 転送タブ（G・F12 の転送の一覧）
+  transfers: {
+    title: "転送",
+    summary: "転送中 {running}・待機 {waiting}・完了 {done}・失敗 {failed}・中止 {cancelled}",
+    failed_count: "失敗{count}",
+    job: "{title} → {dest}",
+    preparing: "転送の準備中…",
+    progress: "{title}（{index}/{total}）{name}",
+    progress_waiting: "　ほか待機{count}件",
+    failed_status: "転送で{count}件失敗しました（転送タブ）",
+    done_status: "終わりました: {title}",
+    cancelled_status: "中止しました: {title}",
   },
   // ダイアログ共通
   dialogs: {

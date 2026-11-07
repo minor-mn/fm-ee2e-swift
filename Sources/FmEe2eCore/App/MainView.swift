@@ -18,6 +18,11 @@ final class MainView: View, Workspace {
     rightMode = Self.startMode(config)
     leftMode = config.leftTabs[0]
     preview = PreviewOverlay(app)
+    transfers.onChange = { [unowned self] in
+      transfersPane?.refresh()
+      app.requestRender()
+    }
+    transfers.onJobFinished = { [unowned self] job in transferFinished(job) }
     container.localDirectory = { [unowned self] in local.dir }
     containerLeft.localDirectory = { [unowned self] in localRight.dir }
     // 左の SSH を切る（別の接続先につなぎ直すときを含む）前に、それを経由する右の SSH を切る。
@@ -164,7 +169,53 @@ final class MainView: View, Workspace {
   private var gitLocated = false
 
   /// 右の窓に git を出している。
-  var showGit: Bool { rightMode == .git && gitPane != nil }
+  var showGit: Bool { rightMode == .git && gitPane != nil && !rightTransfers }
+
+  // ---- 転送タブ ----
+
+  /// G・F12 の転送の順番待ちと履歴（左右で1つ）。
+  let transfers = Transfers()
+
+  /// 転送タブ。最初の転送を始めたときに作り、そのあとは左右どちらの Tab の切り替えにも入る。
+  private(set) var transfersPane: TransfersPane?
+
+  /// 左・右の窓に、転送タブを出している（[leftMode]・[rightMode] は、転送タブから戻ったときのタブ）。
+  private var leftTransfers = false
+  private var rightTransfers = false
+
+  func startTransfer(_ job: TransferJob, to destination: Pane) {
+    if transfersPane == nil {
+      transfersPane = TransfersPane(app, transfers)
+    }
+    if left === destination {
+      leftTransfers = true
+    } else {
+      rightTransfers = true
+    }
+    transfers.add(job)
+    app.requestRender()
+  }
+
+  /// 転送が1つ終わった。失敗があれば件数を、なければ終わったことを下の帯に出す（小窓は出さない）。
+  private func transferFinished(_ job: TransferJob) {
+    let failed = job.failedCount
+    if failed > 0 {
+      app.showStatus(tr("transfers.failed_status", ["count": failed]))
+    } else if job.doneCount == job.items.count {
+      app.showStatus(tr("transfers.done_status", ["title": job.title]))
+    } else {
+      app.showStatus(tr("transfers.cancelled_status", ["title": job.title]))
+    }
+  }
+
+  /// 送っている間に、下の帯に出す1行。送っていなければ nil。
+  private var transferLine: String? {
+    guard let (job, item) = transfers.running else { return nil }
+    let index = (job.items.firstIndex { $0 === item } ?? 0) + 1
+    let waiting = transfers.jobs.filter { $0 !== job && !$0.finished }.count
+    let line = tr("transfers.progress", ["title": job.title, "index": index, "total": job.items.count, "name": item.name])
+    return waiting > 0 ? line + tr("transfers.progress_waiting", ["count": waiting]) : line
+  }
 
   var clip: Clip?
 
@@ -175,7 +226,10 @@ final class MainView: View, Workspace {
   private let preview: PreviewOverlay
 
   var left: Pane {
-    switch leftMode {
+    if leftTransfers, let transfersPane {
+      return transfersPane
+    }
+    return switch leftMode {
     case .local: local
     case .ssh: sshLeft
     case .container: containerLeft
@@ -183,6 +237,9 @@ final class MainView: View, Workspace {
   }
 
   var right: Pane {
+    if rightTransfers, let transfersPane {
+      return transfersPane
+    }
     if !rightModes.contains(rightMode) {
       return rightMode == .git && !gitLocated ? gitChecking : noTab
     }
@@ -199,7 +256,10 @@ final class MainView: View, Workspace {
   var active: Pane { rightActive ? right : left }
 
   /// すべての窓。
-  private var panes: [Pane] { [local, sshLeft, containerLeft, drive] + (gitPane.map { [$0] } ?? []) + [ssh, container, icloud, localRight] }
+  private var panes: [Pane] {
+    [local, sshLeft, containerLeft, drive] + (gitPane.map { [$0] } ?? []) + [ssh, container, icloud, localRight]
+      + (transfersPane.map { [$0] } ?? [])
+  }
 
   // ---- 描画 ----
 
@@ -226,27 +286,58 @@ final class MainView: View, Workspace {
     // 窓は、タブの見た目（GUI 版では文字の大きさも）で描く。
     screen.layer(0, 4, leftWidth, paneHeight, theme: left.themeKey, framed: true) { s in
       left.draw(s, 0, 0, s.width, s.height, focused: !rightActive, accentBorder: !rightActive)
+      setFileDrop(s, left)
       if rightActive, let (source, entry, kind) = target {
         preview.draw(s, source, entry, kind, 0, 0, s.width, s.height)
+        s.clearFileTargets()
       }
     }
     // 右の窓（Google Drive・git・SSH・iCloud Drive）は、選んでいなくても色で見分けられるよう、いつも自分の色の枠にする。
     screen.layer(leftWidth, 4, w - leftWidth, paneHeight, theme: right.themeKey, framed: true) { s in
       right.draw(s, 0, 0, s.width, s.height, focused: rightActive, accentBorder: true)
+      setFileDrop(s, right)
       if !rightActive, let (source, entry, kind) = target {
         preview.draw(s, source, entry, kind, 0, 0, s.width, s.height)
+        s.clearFileTargets()
       }
     }
     if let marked = panes.first(where: { !$0.marks.isEmpty }) {
       drawMarks(screen, h - 4, marked, marked === local || marked === sshLeft || marked === containerLeft ? tr("main_view.side.left") : tr("main_view.side.right"))
     }
     drawInfo(screen, h - 3)
+    // 裏で送っている転送は、案内とファンクションキーの間の行の左に出す（右は [App.showStatus] の文言）。
+    if let line = transferLine {
+      screen.text(1, h - 2, truncate(line, max(0, w * 2 / 3)), Style(fg: Palette.lime))
+    }
     drawFunctionKeyBar(screen, h - 1)
+  }
+
+  /// [pane] を描いた画面 [s] に、ほかのアプリからドロップされたファイルの受け取り先を付ける。
+  /// ダイアログなどを出している間は受け取らない。
+  private func setFileDrop(_ s: Screen, _ pane: Pane) {
+    guard !app.hasModal, pane.dragsFiles, let pane = pane as? LocalPane else {
+      return
+    }
+    s.fileDrop = { [weak self] paths in await self?.dropFiles(paths, pane) }
+  }
+
+  /// ほかのアプリからドロップされた [paths] を、[pane] で開いているフォルダーにコピーする（C・P と同じ流れ）。
+  private func dropFiles(_ paths: [String], _ pane: LocalPane) async {
+    let c = CommandContext(self, pane, [])
+    do {
+      let focus = try await LocalPaste().paste(c, LocalClip(paths, move: false))
+      await pane.load(focus: focus)
+    } catch {
+      await app.showError(error)
+    }
   }
 
   /// 選んでいる窓（ローカル・iCloud Drive・SSH）でカーソルが画像か動画（SSH は画像だけ）に乗っていて、
   /// プレビューを反対側の窓に重ねられるとき、その窓と項目と種類。左のローカルで選んでいて右が SSH のときは重ねない。
   private func previewTarget() -> (Pane, Entry, PreviewKind)? {
+    if active is TransfersPane {
+      return nil
+    }
     let source: Pane?
     if rightActive {
       switch rightMode {
@@ -280,7 +371,7 @@ final class MainView: View, Workspace {
       ("char: ", "Space", tr("main_view.keys.mark")),
       ("tab", "Tab", tr("main_view.keys.tab")),
     ]
-    if config.leftTabs.count > 1 {
+    if config.leftTabs.count > 1 || transfersPane != nil {
       keys.append(("backTab", "Shift+Tab", tr("main_view.keys.left_tab")))
     }
     keys.append(("left", "←→", tr("main_view.keys.switch_pane")))
@@ -343,6 +434,13 @@ final class MainView: View, Workspace {
   /// 選んでいる窓で G・F12 を押したときに実行するコマンド。左の窓の G は右のタブが決め、右の窓の G は右のタブ自身が持つ。
   /// 左が SSH のときは、右がローカル（左の接続先との scp）・Git（Git コマンド）・SSH（左の接続先からつないだ接続先との scp）。
   private var transferCommand: Command? {
+    // 転送タブを選んでいれば、転送タブのメニュー（retry など）。反対側の窓の G は効かない。
+    if active is TransfersPane {
+      return active.commands[.transfer]
+    }
+    if left is TransfersPane || right is TransfersPane {
+      return nil
+    }
     // 右が Git なら、左が Container でも G は Git のコマンド。
     if (left is ContainerPane || right is ContainerPane) && !showGit {
       guard (left is ContainerPane && right is LocalPane) || (left is LocalPane && right is ContainerPane) else { return nil }
@@ -410,21 +508,23 @@ final class MainView: View, Workspace {
       pane.move(pane.entries.count)
     case "tab":
       // 右の窓を、設定ファイルの right_tabs の数の小さい順に切り替える（git は見つかったときだけ）。
-      // 0 のタブと、左の窓のタブで使えないタブは飛ばす。
-      let modes = rightModes
-      if modes.isEmpty {
+      // 0 のタブと、左の窓のタブで使えないタブは飛ばす。転送タブがあれば最後に入れる（nil）。
+      let cycle: [RightMode?] = rightModes.map { $0 } + (transfersPane == nil ? [] : [nil])
+      if cycle.isEmpty {
         return
       }
       rightChosen = true
-      if let index = modes.firstIndex(of: rightMode) {
-        rightMode = modes[(index + 1) % modes.count]
+      let index = rightTransfers ? cycle.count - 1 : (cycle.firstIndex { $0 == rightMode } ?? -1)
+      if let next = cycle[(index + 1) % cycle.count] {
+        rightTransfers = false
+        rightMode = next
       } else {
-        rightMode = modes[0]
+        rightTransfers = true
       }
       if showGit {
         Task { await showGitPane() }
       }
-      if rightMode == .container { run { await self.container.load() } }
+      if rightMode == .container && !rightTransfers { run { await self.container.load() } }
       app.requestRender()
     case "backTab":
       switchLeft()
@@ -542,10 +642,17 @@ final class MainView: View, Workspace {
   /// 左の窓を、設定ファイルの left_tabs の順に切り替える（Shift+Tab）。0 のタブは飛ばす。
   /// 右に左のタブで使えないタブを出していれば、右をローカル（off なら使えるうち最初のタブ）にする。
   private func switchLeft() {
-    let leftModes = config.leftTabs
-    guard leftModes.count > 1 else { return }
-    let index = leftModes.firstIndex(of: leftMode) ?? 0
-    leftMode = leftModes[(index + 1) % leftModes.count]
+    // 転送タブがあれば最後に入れる（nil）。
+    let cycle: [LeftMode?] = config.leftTabs.map { $0 } + (transfersPane == nil ? [] : [nil])
+    guard cycle.count > 1 else { return }
+    let index = leftTransfers ? cycle.count - 1 : (cycle.firstIndex { $0 == leftMode } ?? 0)
+    guard let next = cycle[(index + 1) % cycle.count] else {
+      leftTransfers = true
+      app.requestRender()
+      return
+    }
+    leftTransfers = false
+    leftMode = next
     if leftMode == .ssh && sshLeft.entries.isEmpty && !sshLeft.loading {
       Task { await sshLeft.load() }
     }

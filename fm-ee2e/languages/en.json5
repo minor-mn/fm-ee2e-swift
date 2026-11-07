@@ -90,6 +90,8 @@
         "               (When the right is git status, Git commands. Pressed on the left, offers",
         "                git add / restore / rm for the left files, depending on their state)",
         "               If the cursor and marks give several targets, marks only; if one, the cursor",
+        "               G transfers run in the background. Starting one switches the destination side to the Transfers tab",
+        "               In the Transfers tab, G / F12 offers cancel / retry for the transfer or item at the cursor (the marks, if any)",
         "D / Del        Delete (move to the Trash; SSH deletes with rm)",
         "A              Change permissions",
         "S              Shell (enter a command and run it in a frame; Enter returns when done)",
@@ -182,13 +184,10 @@
     // Google Drive
     drive_unavailable: "Google Drive is unavailable.",
     drive_loading: "Loading the Google Drive folder.",
-    in_progress: "{title} in progress…",
-    in_progress_item: "{title} in progress… {name}",
     upload: "Upload",
     drive_upload_confirm: "Encrypt {label} and upload to {location} on Google Drive.",
     download: "Download",
     drive_download_confirm: "Decrypt {label} and download to {dir}.",
-    in_progress_count: "{title} in progress ({index}/{total}) {name}",
     // iCloud Drive
     icloud_unavailable: "iCloud Drive is unavailable.",
     icloud_loading: "Loading the iCloud Drive folder.",
@@ -205,6 +204,19 @@
     staging_remove_failed: "Can’t delete the temporary folder {staging}: {error}",
     copy_right: "Copy to right",
     copy_left: "Copy to left",
+  },
+  // Transfers tab (the list of G / F12 transfers)
+  transfers: {
+    title: "Transfers",
+    summary: "Running {running} · waiting {waiting} · done {done} · failed {failed} · cancelled {cancelled}",
+    failed_count: "{count} failed",
+    job: "{title} → {dest}",
+    preparing: "Preparing the transfer…",
+    progress: "{title} ({index}/{total}) {name}",
+    progress_waiting: "  ({count} more waiting)",
+    failed_status: "{count} items failed to transfer (see the Transfers tab)",
+    done_status: "Finished: {title}",
+    cancelled_status: "Cancelled: {title}",
   },
   // Common dialog text
   dialogs: {

@@ -29,6 +29,16 @@ class LocalPane: PathPane {
 
   override var canClip: Bool { !readOnly }
 
+  /// 圧縮ファイルの中は、実際のファイルではないので渡さない。
+  override var dragsFiles: Bool { !readOnly }
+
+  override func dragPaths(_ entry: Entry) -> [String]? {
+    if entry.isParent {
+      return nil
+    }
+    return isMarked(entry) ? marks.values.map(pathOfMark) : [pathOf(entry)]
+  }
+
   override var context: PathContext { p }
 
   override var dirPath: String { dir }

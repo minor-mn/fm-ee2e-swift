@@ -130,19 +130,31 @@ nonisolated struct EncryptedFormat: Sendable {
   }
 
   /// ローカルの [from] を暗号化して [to] に書く（[to] は作り直す）。チャンクごとに読み書きし、別のスレッドで動かす。
+  /// 呼んだ Task が取り消されたら、次のチャンクを読むところで止める（[to] は途中のまま残る）。
   func encrypt(from: String, to: String, key: Data) async throws {
-    try await Task.detached { [self] in
+    try await Self.detached { [self] in
       try Self.pipe(from: from, to: to) { read, write in
         try encrypt(read: read, write: write, key: key)
       }
-    }.value
+    }
   }
 
   /// [from] を復号して [to] に書く（[to] は作り直す）。チャンクごとに読み書きし、別のスレッドで動かす。
+  /// 呼んだ Task が取り消されたら、次のチャンクを読むところで止める（[to] は途中のまま残る）。
   func decrypt(from: String, to: String, key: Data) async throws {
-    try await Task.detached { [self] in
+    try await Self.detached { [self] in
       try decrypt(from: from, to: to, key: key, onRead: { _ in })
-    }.value
+    }
+  }
+
+  /// [body] を別のスレッドで動かす。呼んだ Task の取り消しを、その中に伝える。
+  private static func detached(_ body: @escaping @Sendable () throws -> Void) async throws {
+    let task = Task.detached { try body() }
+    try await withTaskCancellationHandler {
+      try await task.value
+    } onCancel: {
+      task.cancel()
+    }
   }
 
   /// [decrypt] の同期版。[onRead] には [from] から読んだ暗号化されたバイト列をそのまま渡す（ハッシュを取るためなど）。
@@ -171,6 +183,7 @@ nonisolated struct EncryptedFormat: Sendable {
     let output = try FileHandle(fileDescriptor: openFile(to, O_WRONLY | O_CREAT | O_TRUNC), closeOnDealloc: true)
     try body(
       { length in
+        try Task.checkCancellation()
         var bytes = Data()
         while bytes.count < length {
           guard let more = try input.read(upToCount: length - bytes.count), !more.isEmpty else {

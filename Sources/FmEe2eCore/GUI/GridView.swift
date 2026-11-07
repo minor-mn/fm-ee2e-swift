@@ -9,6 +9,7 @@ final class GridView: NSView, NSTextInputClient {
   init(_ host: GuiHost) {
     self.host = host
     super.init(frame: .zero)
+    registerForDraggedTypes([.fileURL] + NSFilePromiseReceiver.readableDraggedTypes.map { NSPasteboard.PasteboardType($0) })
   }
 
   @available(*, unavailable)
@@ -654,6 +655,18 @@ final class GridView: NSView, NSTextInputClient {
       openLink(at: point)
       return
     }
+    // 後ろにあるときか CapsLock 中にファイルの行を押したら、範囲選択ではなく、ドラッグでほかのアプリに渡す準備をする。
+    let fromBehind = clickedBehind || !NSApp.isActive
+    clickedBehind = false
+    if let files = filesToDrag(event, fromBehind: fromBehind) {
+      pendingFiles = files
+      pendingFromBehind = fromBehind
+      if selection != nil {
+        selection = nil
+        needsDisplay = true
+      }
+      return
+    }
     if let (source, s, origin) = selectable(at: point) {
       let (x, y) = cellAt(point, s, origin)
       let line = source.firstVisibleLine + y
@@ -665,6 +678,11 @@ final class GridView: NSView, NSTextInputClient {
   }
 
   override func mouseDragged(with event: NSEvent) {
+    if let files = pendingFiles {
+      pendingFiles = nil
+      beginFileDrag(files, event)
+      return
+    }
     dragPoint = convert(event.locationInWindow, from: nil)
     extendSelection()
   }
@@ -699,6 +717,11 @@ final class GridView: NSView, NSTextInputClient {
   }
 
   override func mouseUp(with event: NSEvent) {
+    // ファイルの行を押しただけで、ドラッグしなかった。
+    if pendingFiles != nil {
+      pendingFiles = nil
+      return
+    }
     stopAutoscroll()
     dragPoint = nil
     // ドラッグせずにクリックしただけなら、そこのリンクを開く。
@@ -707,6 +730,91 @@ final class GridView: NSView, NSTextInputClient {
       needsDisplay = true
       openLink(at: convert(event.locationInWindow, from: nil))
     }
+  }
+
+  // ---- ほかのアプリとのファイルの受け渡し ----
+
+  /// 押したファイルの行の、渡すパス（まだドラッグを始めていない）。
+  private var pendingFiles: [String]?
+
+  /// [pendingFiles] は、後ろにあるときに押したもの。
+  private var pendingFromBehind = false
+
+  /// 後ろにあるときに、ファイルの行を押した（[shouldDelayWindowOrdering] から [mouseDown] へ伝える）。
+  private var clickedBehind = false
+
+  /// [event] がファイルの行を押したもので、後ろにあるとき（[fromBehind]）か CapsLock 中なら、その行を掴んだときに渡すパス。
+  private func filesToDrag(_ event: NSEvent, fromBehind: Bool) -> [String]? {
+    guard fromBehind || event.modifierFlags.contains(.capsLock) else { return nil }
+    let point = convert(event.locationInWindow, from: nil)
+    guard let (_, s, origin) = selectable(at: point), let filesAt = s.filesAt else { return nil }
+    let (x, y) = cellAt(point, s, origin)
+    return filesAt(x, y)
+  }
+
+  /// 後ろにある（ほかのアプリが前にある）ときにファイルの行を押したら、前に出すのを待つ
+  /// （最初のクリックを受け取るのは [acceptsFirstMouse]）。ドラッグせずに離したら、いつもどおり前に出る。
+  override func shouldDelayWindowOrdering(for event: NSEvent) -> Bool {
+    clickedBehind = filesToDrag(event, fromBehind: true) != nil
+    return clickedBehind
+  }
+
+  /// [files] をファイルとしてドラッグし始める。
+  private func beginFileDrag(_ files: [String], _ event: NSEvent) {
+    // 後ろにあるときは、前に出さないまま渡す。
+    if pendingFromBehind {
+      NSApp.preventWindowOrdering()
+    }
+    let point = convert(event.locationInWindow, from: nil)
+    let size: CGFloat = 32
+    let items = files.enumerated().map { index, path in
+      let item = NSDraggingItem(pasteboardWriter: NSURL(fileURLWithPath: path))
+      // 複数のときは、少しずつずらして重ねる。
+      let shift = CGFloat(min(index, 4)) * 6
+      item.setDraggingFrame(
+        CGRect(x: point.x - size / 2 + shift, y: point.y - size / 2 + shift, width: size, height: size),
+        contents: NSWorkspace.shared.icon(forFile: path)
+      )
+      return item
+    }
+    beginDraggingSession(with: items, event: event, source: self)
+  }
+
+  /// [sender] のドロップを受け取る先。ほかのアプリからのドラッグで、受け取る窓の上でなければ nil。
+  private func dropTarget(_ sender: NSDraggingInfo) -> (([String]) async -> Void)? {
+    // このアプリの中からのドラッグ（左右の窓の間など）は受け取らない。
+    if sender.draggingSource != nil {
+      return nil
+    }
+    guard let (_, s, _) = selectable(at: convert(sender.draggingLocation, from: nil)) else { return nil }
+    return s.fileDrop
+  }
+
+  override func draggingEntered(_ sender: NSDraggingInfo) -> NSDragOperation { dropTarget(sender) == nil ? [] : .copy }
+
+  override func draggingUpdated(_ sender: NSDraggingInfo) -> NSDragOperation { dropTarget(sender) == nil ? [] : .copy }
+
+  /// ファイルならそのまま、まだファイルになっていないもの（ブラウザの画像など）は一時フォルダーに書いてもらってから渡す。
+  override func performDragOperation(_ sender: NSDraggingInfo) -> Bool {
+    guard let drop = dropTarget(sender) else { return false }
+    let pasteboard = sender.draggingPasteboard
+    let urls = pasteboard.readObjects(forClasses: [NSURL.self], options: [.urlReadingFileURLsOnly: true]) as? [URL] ?? []
+    if !urls.isEmpty {
+      let paths = urls.map(\.path)
+      Task { await drop(paths) }
+      return true
+    }
+    let receivers = pasteboard.readObjects(forClasses: [NSFilePromiseReceiver.self], options: nil) as? [NSFilePromiseReceiver] ?? []
+    guard !receivers.isEmpty, let temp = try? makeTempDir("fm-ee2e-drop-") else { return false }
+    PromisedFiles.receive(receivers, into: temp) { paths in
+      Task {
+        if !paths.isEmpty {
+          await drop(paths)
+        }
+        try? FileManager.default.removeItem(atPath: temp)
+      }
+    }
+    return true
   }
 
   /// ホイール・トラックパッドで、枠の中の端末の流れた行をさかのぼる。
@@ -1015,6 +1123,54 @@ extension GridView: NSTextInputTraits {
   var writingToolsBehavior: NSWritingToolsBehavior {
     get { .none }
     set {}
+  }
+}
+
+/// ほかのアプリへファイルを渡す側。コピーだけを許し（渡した先が元を動かさない）、このアプリの中には落とさせない。
+extension GridView: NSDraggingSource {
+  func draggingSession(_ session: NSDraggingSession, sourceOperationMaskFor context: NSDraggingContext) -> NSDragOperation {
+    context == .outsideApplication ? .copy : []
+  }
+}
+
+/// ドロップされた、まだファイルになっていないもの（ファイルプロミス）を受け取る。書いてもらう処理は別のスレッドで動く。
+private nonisolated enum PromisedFiles {
+  /// [receivers] のファイルを [dir] に書いてもらい、全部そろったら、書けたもののパスを [done] に（メインスレッドで）渡す。
+  static func receive(_ receivers: [NSFilePromiseReceiver], into dir: String, _ done: @escaping @MainActor @Sendable ([String]) -> Void) {
+    let collector = Collector(receivers.reduce(0) { $0 + max($1.fileNames.count, 1) }, done)
+    let queue = OperationQueue()
+    for receiver in receivers {
+      receiver.receivePromisedFiles(atDestination: URL(fileURLWithPath: dir), options: [:], operationQueue: queue) { @Sendable url, error in
+        collector.add(error == nil ? url.path : nil)
+      }
+    }
+  }
+
+  /// 書けたファイルを数え、予定の数に届いたら知らせる。
+  private nonisolated final class Collector: @unchecked Sendable {
+    init(_ expected: Int, _ done: @escaping @MainActor @Sendable ([String]) -> Void) {
+      remaining = expected
+      self.done = done
+    }
+
+    private let lock = NSLock()
+    private var remaining: Int
+    private var paths: [String] = []
+    private let done: @MainActor @Sendable ([String]) -> Void
+
+    func add(_ path: String?) {
+      lock.lock()
+      if let path {
+        paths.append(path)
+      }
+      remaining -= 1
+      let finished = remaining == 0 ? paths : nil
+      lock.unlock()
+      if let finished {
+        let done = done
+        Task { @MainActor in done(finished) }
+      }
+    }
   }
 }
 
