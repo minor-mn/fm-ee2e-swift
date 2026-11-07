@@ -22,6 +22,7 @@ private nonisolated final class RunningProcesses: @unchecked Sendable {
   private var cancelled = false
 
   func add(_ process: Process) {
+    ChildProcesses.add(process)
     lock.lock()
     processes.append(process)
     let stop = cancelled
@@ -78,12 +79,15 @@ private nonisolated func pipeline(
       try? pipe.fileHandleForWriting.close()
       dest.terminate()
       dest.waitUntilExit()
+      ChildProcesses.remove(dest.processIdentifier)
       throw error
     }
     try? pipe.fileHandleForReading.close()
     try? pipe.fileHandleForWriting.close()
     source.waitUntilExit()
     dest.waitUntilExit()
+    ChildProcesses.remove(source.processIdentifier)
+    ChildProcesses.remove(dest.processIdentifier)
     try errors.seek(toOffset: 0)
     let stderr = try errors.readToEnd() ?? Data()
     let failed = source.terminationStatus != 0 ? source : dest

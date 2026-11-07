@@ -319,7 +319,8 @@ nonisolated struct RemoteEntry: Sendable {
     mode: Int? = nil,
     permissions: String? = nil,
     owner: String? = nil,
-    group: String? = nil
+    group: String? = nil,
+    linkTarget: String? = nil
   ) {
     self.name = name
     self.isDir = isDir
@@ -330,6 +331,7 @@ nonisolated struct RemoteEntry: Sendable {
     self.permissions = permissions
     self.owner = owner
     self.group = group
+    self.linkTarget = linkTarget
   }
 
   let name: String
@@ -347,6 +349,9 @@ nonisolated struct RemoteEntry: Sendable {
   let permissions: String?
   let owner: String?
   let group: String?
+
+  /// シンボリックリンクなら、ls -l の「名前 -> 先」の先（書かれたまま。相対のこともある）。
+  let linkTarget: String?
 }
 
 /// POSIX sh の1語として、' で囲む。
@@ -397,6 +402,7 @@ nonisolated func parseRemoteList(_ out: Data, _ now: Date) -> [RemoteEntry] {
     kinds[key] = item.unicodeScalars.first == "d"
   }
   var details: [[UInt8]: Regex<AnyRegexOutput>.Match] = [:]
+  var targets: [[UInt8]: String] = [:]
   for line in decode(out[..<split]).components(separatedBy: "\n") {
     guard let m = line.firstMatch(of: lsLine) else {
       continue
@@ -404,13 +410,19 @@ nonisolated func parseRemoteList(_ out: Data, _ now: Date) -> [RemoteEntry] {
     var name = regexGroup(m, 9)!
     if regexGroup(m, 1) == "l" {
       // 「名前 -> 先」。名前に「 -> 」が入っていても、知っている名前のうち一番長いもので切る。
+      let whole = name
       var known: String?
-      for k in names where Array(name.utf8).starts(with: Array("\(k) -> ".utf8)) {
+      for k in names where Array(whole.utf8).starts(with: Array("\(k) -> ".utf8)) {
         if known == nil || k.utf16.count > known!.utf16.count {
           known = k
         }
       }
-      name = known ?? name.components(separatedBy: " -> ")[0]
+      name = known ?? whole.components(separatedBy: " -> ")[0]
+      let prefix = Array("\(name) -> ".utf8)
+      let bytes = Array(whole.utf8)
+      if bytes.starts(with: prefix) {
+        targets[Array(name.utf8)] = String(decoding: bytes[prefix.count...], as: UTF8.self)
+      }
     }
     details[Array(name.utf8)] = m
   }
@@ -428,7 +440,8 @@ nonisolated func parseRemoteList(_ out: Data, _ now: Date) -> [RemoteEntry] {
       mode: parseMode(regexGroup(m, 2)!),
       permissions: "\(regexGroup(m, 1)!)\(regexGroup(m, 2)!)",
       owner: regexGroup(m, 3),
-      group: regexGroup(m, 4)
+      group: regexGroup(m, 4),
+      linkTarget: targets[Array(name.utf8)]
     )
   }
 }

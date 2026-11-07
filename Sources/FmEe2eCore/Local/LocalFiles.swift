@@ -67,6 +67,13 @@ nonisolated func statPath(_ path: String) -> FileStat { fileStat(path, follow: t
 /// [path] の lstat（シンボリックリンクはたどらない）。
 nonisolated func lstatPath(_ path: String) -> FileStat { fileStat(path, follow: false) }
 
+/// シンボリックリンク [path] に書かれた先。相対なら、リンクのあるフォルダーから見た絶対パスにする。リンクでなければ nil。
+nonisolated func symlinkTarget(_ path: String) -> String? {
+  let path = p.absolute(path)
+  guard let destination = try? FileManager.default.destinationOfSymbolicLink(atPath: path) else { return nil }
+  return p.normalize(destination.hasPrefix("/") ? destination : p.join(p.dirname(path), destination))
+}
+
 /// [dir] の中の項目のパス（シンボリックリンクはたどらない）。開けなければ [FileSystemException]。
 nonisolated func listDirectory(_ dir: String) throws -> [String] {
   do {

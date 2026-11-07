@@ -124,7 +124,8 @@ class LocalPane: PathPane {
       for (i, item) in chunk.enumerated() {
         let parts = lines[i].components(separatedBy: "\t")
         if parts.count == 3 {
-          result[item.name] = Ownership(parts[0], parts[1], parts[2])
+          let link = parts[2].hasPrefix("l") ? symlinkTarget(item.path) : nil
+          result[item.name] = Ownership(parts[0], parts[1], parts[2], linkTarget: link)
         }
       }
     }

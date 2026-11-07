@@ -18,6 +18,7 @@ public func runFmEe2eGUI() -> Never {
   withExtendedLifetime(delegate) {
     application.run()
   }
+  ChildProcesses.terminateAll()
   exit(0)
 }
 
@@ -80,6 +81,8 @@ private final class GuiAppDelegate: NSObject, NSApplicationDelegate, NSWindowDel
     if let shown {
       GuiState(lastLocalDir: shown.local.dir).save()
     }
+    // 圧縮の tar など、まだ動いている子プロセスを止めてから終わる。
+    ChildProcesses.terminateAll()
     exit(0)
   }
 

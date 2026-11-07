@@ -227,7 +227,9 @@ class SshPane: PathPane {
     guard let e = entry.data as? RemoteEntry, let owner = e.owner, let group = e.group, let permissions = e.permissions else {
       return nil
     }
-    return Ownership(owner, group, permissions)
+    // 相対のリンク先は、開いているフォルダーから見た絶対パスにする。
+    let link = e.linkTarget.map { $0.hasPrefix("/") ? $0 : PathContext.posix.normalize(PathContext.posix.join(dir, $0)) }
+    return Ownership(owner, group, permissions, linkTarget: link)
   }
 
   func goTo(_ target: String, focus: String? = nil) async throws {

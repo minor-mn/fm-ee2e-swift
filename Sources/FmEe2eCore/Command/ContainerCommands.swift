@@ -79,10 +79,10 @@ final class ContainerSettingsCommand: Command {
   override func run(_ c: CommandContext) async { await (c.pane as! ContainerPane).editSettings() }
 }
 
-/// カーソルのコンテナのログを見る（F12）。
+/// コンテナの一覧のメニュー（F12）。表示の切り替え・ログ・イメージの削除。
 final class ContainerLogs: Command {
   override var label: String { "Container" }
   override var needsReady: Bool { false }
-  override func available(_ pane: Pane) -> Bool { (pane as? ContainerPane)?.canShowLogs ?? false }
-  override func run(_ c: CommandContext) async { await (c.pane as! ContainerPane).showLogs() }
+  override func available(_ pane: Pane) -> Bool { (pane as? ContainerPane)?.canShowMenu ?? false }
+  override func run(_ c: CommandContext) async { await (c.pane as! ContainerPane).showMenu() }
 }

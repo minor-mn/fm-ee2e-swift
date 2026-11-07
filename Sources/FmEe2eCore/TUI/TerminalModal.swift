@@ -280,10 +280,8 @@ final class TerminalModal: Modal, SelectionSource {
     var text = ""
     var cells: [CellPosition] = []
     func flush() {
-      let s = text as NSString
-      for match in TerminalModal.urlPattern.matches(in: text, range: NSRange(location: 0, length: s.length)) {
-        let url = TerminalModal.trimTrailing(s.substring(with: match.range))
-        for i in match.range.location..<(match.range.location + url.utf16.count) {
+      for (range, url) in TerminalModal.urls(in: text) {
+        for i in range {
           links[cells[i]] = url
         }
       }
@@ -310,6 +308,15 @@ final class TerminalModal: Modal, SelectionSource {
   }
 
   private static let urlPattern = try! NSRegularExpression(pattern: #"https?://[^\s<>"'`]+"#)
+
+  /// [text] の中の URL と、その位置（UTF-16 で数えた範囲。末尾の句読点・閉じ括弧は含めない）。
+  static func urls(in text: String) -> [(range: Range<Int>, url: String)] {
+    let s = text as NSString
+    return urlPattern.matches(in: text, range: NSRange(location: 0, length: s.length)).map { match in
+      let url = trimTrailing(s.substring(with: match.range))
+      return (match.range.location..<(match.range.location + url.utf16.count), url)
+    }
+  }
 
   /// URL の末尾の句読点・閉じ括弧（`[.,;:!?)\]}>]+$`）を除く。
   private static func trimTrailing(_ url: String) -> String {
