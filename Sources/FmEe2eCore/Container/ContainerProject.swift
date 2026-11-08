@@ -229,6 +229,31 @@ struct NativeContainerProject {
     return NativeContainerProject(root: source.directory, definitions: definitions)
   }
 
+  /// docker-compose から作り直した設定を保存して返す（L で読み直すとき）。保存済みの設定は compose とずれてはいけないので、
+  /// compose から来た設定はすべて取り込み直し、compose から来ていない設定（Dockerfile・Containerfile から作ったもの）だけを残す。
+  /// 設定のファイルは書き直し、使わなくなったものは消す。
+  static func rebuild(_ compose: ComposeProject, root: String) throws -> NativeContainerProject {
+    let existing = FileManager.default.fileExists(atPath: settings(root)) ? try? read(root) : nil
+    let draft = try importDraft(compose)
+    let names = Set(draft.definitions.map(\.name))
+    let services = Set(draft.definitions.map(\.service))
+    // compose から作った設定は、作成の引数に fm-ee2e.compose.project のラベルを持つ（作れなかったものは引数が空）。
+    func fromCompose(_ definition: NativeContainerDefinition) -> Bool {
+      definition.create.isEmpty || definition.create.contains { $0.hasPrefix("fm-ee2e.compose.project=") }
+    }
+    let kept = (existing?.definitions ?? []).filter { !fromCompose($0) && !names.contains($0.name) && !services.contains($0.service) }
+    let project = NativeContainerProject(root: root, definitions: draft.definitions + kept, awsProfile: existing?.awsProfile)
+    let directory = p.join(root, ".fm-ee2e", "containers")
+    try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+    for definition in project.definitions { try write(definition.json, project.file(definition)) }
+    let used = Set(project.definitions.map { "\($0.service).json5" })
+    for name in (try? FileManager.default.contentsOfDirectory(atPath: directory)) ?? [] where name.hasSuffix(".json5") && !used.contains(name) {
+      try? FileManager.default.removeItem(atPath: p.join(directory, name))
+    }
+    try project.save()
+    return project
+  }
+
   func file(_ definition: NativeContainerDefinition) -> String { p.join(root, ".fm-ee2e", "containers", "\(definition.service).json5") }
 
   func save() throws {

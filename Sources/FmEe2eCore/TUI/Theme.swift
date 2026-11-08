@@ -27,6 +27,7 @@ nonisolated struct ThemeColors: Sendable {
   var red = Rgb(0xFF4D5E)
   var cyan = Rgb(0x5CD8FF)
   var orange = Rgb(0xFF9F43)
+  var yellow = Rgb(0xFFD43B)
   var greenDark = Rgb(0x0F4A3A)
   var orangeDark = Rgb(0x6B3A12)
   var cyanDark = Rgb(0x124A5E)

@@ -79,6 +79,17 @@ final class ContainerSettingsCommand: Command {
   override func run(_ c: CommandContext) async { await (c.pane as! ContainerPane).editSettings() }
 }
 
+/// 反対側の Container が一覧を出しているときに、ローカルの窓の G・F12 で開くその Container のメニュー（[ContainerLogs] と同じ）。
+final class ContainerMenuFromLocal: Command {
+  override var label: String { "Container" }
+  override var needsReady: Bool { false }
+  override func run(_ c: CommandContext) async {
+    let container = (c.workspace.left as? ContainerPane) ?? (c.workspace.right as? ContainerPane)
+    guard let container, container.canShowMenu else { return }
+    await container.showMenu()
+  }
+}
+
 /// コンテナの一覧のメニュー（F12）。表示の切り替え・ログ・イメージの削除。
 final class ContainerLogs: Command {
   override var label: String { "Container" }

@@ -146,6 +146,93 @@ class ContainerClient {
     return host.contains(".") || host.contains(":") || host == "localhost" ? named : "docker.io/" + named
   }
 
+  /// ローカルにある [image] の platform（linux/arm64 など）。Mac と同じ arm64 があればそれを、なければ amd64、それもなければ最初のもの。
+  /// ローカルになければ nil。
+  func preferredPlatform(_ image: String) async -> String? {
+    guard let result = try? await execute(["image", "inspect", image]), result.exitCode == 0,
+      let rows = try? JSONSerialization.jsonObject(with: result.stdoutData) as? [[String: Any]],
+      let variants = rows.first?["variants"] as? [[String: Any]] else { return nil }
+    let platforms = Self.platforms(variants)
+    return platforms.first { $0 == "linux/arm64" } ?? platforms.first { $0 == "linux/amd64" } ?? platforms.first
+  }
+
+  /// イメージの variants（手元に取得してある platform ごとの中身）を、linux/arm64・linux/arm/v7 のような名前にする。
+  /// 添付データ（unknown）は除く。arm64 の v8 は付けない。
+  static func platforms(_ variants: [[String: Any]]) -> [String] {
+    var result: [String] = []
+    for variant in variants {
+      guard let platform = variant["platform"] as? [String: Any], let os = platform["os"] as? String, let arch = platform["architecture"] as? String,
+        os != "unknown", arch != "unknown" else { continue }
+      let sub = platform["variant"] as? String ?? ""
+      let name = [os, arch, sub.isEmpty || (arch == "arm64" && sub == "v8") ? nil : sub].compactMap { $0 }.joined(separator: "/")
+      if !result.contains(name) { result.append(name) }
+    }
+    return result
+  }
+
+  /// この Mac で動かせる platform。Mac の CPU の platform と、Apple 製 CPU で Rosetta が有効（build.rosetta）なら linux/amd64。
+  func runnablePlatforms() async throws -> [String] {
+    func object(_ args: [String]) async throws -> [String: Any] {
+      guard let value = try JSONSerialization.jsonObject(with: try await checked(args).stdoutData) as? [String: Any] else {
+        throw AppError(tr("container.invalid_list"))
+      }
+      return value
+    }
+    let architecture = (try await object(["system", "status", "--format", "json"])["host"] as? [String: Any])?["architecture"] as? String ?? "arm64"
+    let rosetta = (try await object(["system", "property", "list", "--format", "json"])["build"] as? [String: Any])?["rosetta"] as? Bool ?? false
+    return ["linux/\(architecture)"] + (architecture == "arm64" && rosetta ? ["linux/amd64"] : [])
+  }
+
+  /// [names] のイメージの、platform ごとのレイヤーの一覧（rootfs.diff_ids）。キーは一覧と同じ名前（docker.io/library/… の形）。
+  func imageLayers(_ names: [String]) async throws -> [String: [String: [String]]] {
+    guard !names.isEmpty else { return [:] }
+    guard let rows = try JSONSerialization.jsonObject(with: try await checked(["image", "inspect"] + names).stdoutData) as? [[String: Any]] else {
+      throw AppError(tr("container.invalid_list"))
+    }
+    var result: [String: [String: [String]]] = [:]
+    for row in rows {
+      guard let name = (row["configuration"] as? [String: Any])?["name"] as? String else { continue }
+      for variant in row["variants"] as? [[String: Any]] ?? [] {
+        guard let platform = Self.platforms([variant]).first,
+          let layers = ((variant["config"] as? [String: Any])?["rootfs"] as? [String: Any])?["diff_ids"] as? [String] else { continue }
+        result[name, default: [:]][platform] = layers
+      }
+    }
+    return result
+  }
+
+  /// 元のイメージ → それを元に作ったイメージ。あるイメージのレイヤーの先頭が、同じ platform のほかのイメージのレイヤーとすべて一致すれば、
+  /// そのイメージを元にしている（一致するものが複数あれば、いちばん長く一致したもの）。
+  static func derivedImages(_ layers: [String: [String: [String]]], platform: String) -> [String: [String]] {
+    var result: [String: [String]] = [:]
+    for (name, platforms) in layers {
+      guard let own = platforms[platform] else { continue }
+      let base = layers.filter { other in
+        guard other.key != name, let theirs = other.value[platform] else { return false }
+        return !theirs.isEmpty && theirs.count < own.count && Array(own.prefix(theirs.count)) == theirs
+      }.max { ($0.value[platform]?.count ?? 0) < ($1.value[platform]?.count ?? 0) }
+      if let base { result[base.key, default: []].append(name) }
+    }
+    return result.mapValues { $0.sorted() }
+  }
+
+  /// ローカルにあるイメージと、それぞれの platform（container image list の variants から）。
+  func imagePlatforms() async throws -> [(name: String, platforms: [String])] {
+    guard let rows = try JSONSerialization.jsonObject(with: try await checked(["image", "list", "--format", "json"]).stdoutData) as? [[String: Any]] else {
+      throw AppError(tr("container.invalid_list"))
+    }
+    return rows.compactMap { row in
+      guard let name = (row["configuration"] as? [String: Any])?["name"] as? String else { return nil }
+      return (name, Self.platforms(row["variants"] as? [[String: Any]] ?? []))
+    }
+  }
+
+  /// 一覧の名前（docker.io/library/redis:6.2）を、FROM などに書く短い形（redis:6.2）にする。Docker Hub 以外はそのまま。
+  static func shortImage(_ image: String) -> String {
+    for prefix in ["docker.io/library/", "docker.io/"] where image.hasPrefix(prefix) { return String(image.dropFirst(prefix.count)) }
+    return image
+  }
+
   /// --publish の値（[アドレス:]Mac側:コンテナ側[/プロトコル]）の、Mac 側のポートとプロトコル。Mac 側がなければ nil。
   static func publishedHostPort(_ value: String) -> (port: Int, proto: String)? {
     let parts = value.split(separator: "/", maxSplits: 1).map(String.init)

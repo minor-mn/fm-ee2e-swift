@@ -25,6 +25,8 @@ final class MainView: View, Workspace {
     transfers.onJobFinished = { [unowned self] job in transferFinished(job) }
     container.localDirectory = { [unowned self] in local.dir }
     containerLeft.localDirectory = { [unowned self] in localRight.dir }
+    container.reloadLocal = { [unowned self] in await local.reload() }
+    containerLeft.reloadLocal = { [unowned self] in await localRight.reload() }
     // 左の SSH を切る（別の接続先につなぎ直すときを含む）前に、それを経由する右の SSH を切る。
     sshLeft.beforeDisconnect = { [unowned self] connection in
       if ssh.ssh?.via === connection {
@@ -448,6 +450,10 @@ final class MainView: View, Workspace {
     // 右が Git なら、左が Container でも G は Git のコマンド。
     if (left is ContainerPane || right is ContainerPane) && !showGit {
       guard (left is ContainerPane && right is LocalPane) || (left is LocalPane && right is ContainerPane) else { return nil }
+      // Container がまだコンテナにつないでいない（一覧を出している）ときは、ローカルの窓の G でも Container のメニューを開く。
+      if active is LocalPane, let container = (left as? ContainerPane) ?? (right as? ContainerPane), container.ssh == nil {
+        return ContainerMenuFromLocal()
+      }
       return ContainerTransfer(upload: active is LocalPane)
     }
     if leftMode == .ssh && rightMode == .local {
