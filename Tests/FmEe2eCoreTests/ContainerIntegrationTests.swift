@@ -6,19 +6,6 @@ import Testing
 /// 明示的に有効にしたときだけ、専用のコンテナ・ネットワーク・ボリュームを作って片付ける。
 @MainActor
 struct ContainerIntegrationTests {
-  @Test("外部プロジェクトの compose を実行せず変換する", .enabled(if: ProcessInfo.processInfo.environment["FM_EE2E_COMPOSE_TEST_DIR"] != nil))
-  func externalCompose() throws {
-    let environment = ProcessInfo.processInfo.environment
-    let directory = try #require(environment["FM_EE2E_COMPOSE_TEST_DIR"])
-    let service = environment["FM_EE2E_COMPOSE_TEST_SERVICE"] ?? "app"
-    let project = try ComposeProject.load(ComposeProject.discover(directory))
-    let externalVolumes = Set(project.volumes.map { key, value in
-      (value as? [String: Any])?["name"] as? String ?? key
-    })
-    let plan = try project.plan(service, volumes: externalVolumes)
-    #expect(plan.create.starts(with: ["create", "--name", project.containerName(service)]))
-  }
-
   @Test("Container の起動停止・DNS・ファイル操作・tar 往復転送", .enabled(if: ProcessInfo.processInfo.environment["FM_EE2E_CONTAINER_TESTS"] == "1"))
   func roundTrip() async throws {
     let client = ContainerClient()

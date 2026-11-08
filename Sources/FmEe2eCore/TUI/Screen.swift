@@ -57,6 +57,7 @@ nonisolated enum Palette {
   static var red: Rgb { colors.red }
   static var cyan: Rgb { colors.cyan }
   static var orange: Rgb { colors.orange }
+  static var yellow: Rgb { colors.yellow }
 
   /// 右の窓（Google Drive・git・SSH）のカーソルの行の地の色。
   static var greenDark: Rgb { colors.greenDark }

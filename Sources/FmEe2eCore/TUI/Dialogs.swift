@@ -820,6 +820,62 @@ final class ChoiceDialog: Modal {
   }
 }
 
+/// [x] を付け外しして選ぶ一覧。↑↓ で移り、Space で切り替え、Enter で決め（付けた行の番号を返す）、Esc で変更ごとやめる。
+/// [toggle] は、切り替えたあとの付いている行を返す（ほかと一緒に選べない行を外す、など）。
+final class CheckListDialog: Modal {
+  init(_ title: String, _ options: [String], checked: Set<Int>, toggle: @escaping (Int, Set<Int>) -> Set<Int>, _ close: @escaping (Set<Int>?) -> Void) {
+    self.options = options
+    self.checked = checked
+    self.toggle = toggle
+    self.close = close
+    super.init(title)
+  }
+
+  let options: [String]
+  let toggle: (Int, Set<Int>) -> Set<Int>
+  let close: (Set<Int>?) -> Void
+  private var checked: Set<Int>
+  private var index = 0
+
+  override func preferredWidth(_ screen: Screen) -> Int {
+    min(screen.width - 4, max(textWidth(title) + 8, (options.map(textWidth).max() ?? 0) + 12, 40))
+  }
+
+  override func bodyHeight(_ innerWidth: Int) -> Int { options.count }
+
+  override func drawBody(_ screen: Screen, _ x: Int, _ y: Int, _ innerWidth: Int) {
+    for (i, option) in options.enumerated() {
+      let selected = i == index
+      let style = background.copyWith(bg: selected ? Palette.selected : Palette.surfaceHigh, bold: selected)
+      screen.fill(x, y + i, innerWidth, 1, style)
+      let mark = checked.contains(i) ? "[x]" : "[ ]"
+      screen.text(x + 1, y + i, mark, style.copyWith(fg: checked.contains(i) ? Palette.lime : Palette.muted))
+      screen.text(x + 5, y + i, truncate(option, max(0, innerWidth - 5)), style)
+    }
+  }
+
+  override var hints: [(String, String)] {
+    [("↑↓", tr("dialogs.hint.select")), ("Space", tr("dialogs.hint.toggle")), ("Enter", tr("dialogs.hint.decide")), ("Esc", tr("dialogs.cancel"))]
+  }
+
+  override func handleKey(_ key: Key) {
+    switch key.name {
+    case "escape":
+      close(nil)
+    case "enter":
+      close(checked)
+    case "up":
+      index = (index + options.count - 1) % max(options.count, 1)
+    case "down", "tab":
+      index = (index + 1) % max(options.count, 1)
+    case "char" where key.char == " ":
+      checked = toggle(index, checked)
+    default:
+      break
+    }
+  }
+}
+
 /// 処理中の表示。キーは受け付けない。
 final class ProgressDialog: Modal {
   init(_ message: String, onEscape: (() -> Void)? = nil) {
