@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 
 /// 一覧の1行。
 final class Entry {
@@ -209,7 +209,14 @@ class Pane {
   /// 上の帯の2行（容量と所有者の行）の代わりに出す、名前と値の組。nil ならいつもの容量と所有者を出す。
   var headerFields: [[(String, String)]]? { nil }
 
-  var current: Entry? { entries.isEmpty ? nil : entries[min(max(cursor, 0), entries.count - 1)] }
+  /// カーソルの項目。タイル表示では、タイルに出していない項目（タイルが1つもないとき）は nil。
+  var current: Entry? {
+    if entries.isEmpty {
+      return nil
+    }
+    let entry = entries[min(max(cursor, 0), entries.count - 1)]
+    return tiled && !tileable(entry) ? nil : entry
+  }
 
   /// 開いているフォルダー（[Mark.parent] と同じ形）。
   var folderKey: String { fatalError("folderKey") }
@@ -267,6 +274,9 @@ class Pane {
       if !entries.isEmpty {
         cursor = nearestSelectable(cursor, 1)
       }
+      if tiled {
+        snapToTile()
+      }
     } catch {
       if generation != self.generation {
         return
@@ -297,6 +307,14 @@ class Pane {
 
   func move(_ delta: Int) {
     if entries.isEmpty {
+      return
+    }
+    if tiled {
+      let tiles = tileIndices
+      if !tiles.isEmpty {
+        let position = tiles.firstIndex(of: cursor) ?? 0
+        cursor = tiles[min(max(position + delta, 0), tiles.count - 1)]
+      }
       return
     }
     cursor = nearestSelectable(min(max(cursor + delta, 0), entries.count - 1), delta < 0 ? -1 : 1)
@@ -348,17 +366,147 @@ class Pane {
   }
 
   func toggleMark() {
-    if entries.isEmpty {
+    guard let entry = current else {
       return
     }
-    toggle(entries[cursor])
+    toggle(entry)
     move(1)
   }
 
-  /// 開いているフォルダーの中だけ反転する。
+  /// 開いているフォルダーの中だけ反転する。タイル表示では、タイルに出している項目だけ。
   func invertMarks() {
-    for entry in entries {
+    for entry in entries where !tiled || tileable(entry) {
       toggle(entry)
+    }
+  }
+
+  // ---- タイル表示（Ctrl+T） ----
+
+  /// Ctrl+T でタイル表示にした。
+  private var tileOn = false
+
+  /// 開いているフォルダーの画像・動画だけを、サムネイルのタイルで並べている（SSH の接続前などは、Ctrl+T を押していても一覧）。
+  var tiled: Bool { tileOn && canTile }
+
+  /// タイル表示にできるか（ファイルを一覧している）。
+  var canTile: Bool { false }
+
+  /// タイルに出す項目か（画像・動画のファイル）。
+  func tileable(_ entry: Entry) -> Bool {
+    canTile && !entry.isDir && !entry.isParent && previewKindOf(entry.name) != nil
+  }
+
+  /// タイルに出す項目の、[entries] での位置。
+  var tileIndices: [Int] { entries.indices.filter { tileable(entries[$0]) } }
+
+  /// 1行に並べるタイルの数（前回描いたときの値。↑↓ で1行分動かすのに使う）。
+  private(set) var tileColumns = 1
+
+  /// タイルの行のスクロール位置。
+  private var tileScroll = 0
+
+  private lazy var tileImages = TileImages(app)
+
+  /// タイル表示と一覧を切り替える。タイル表示にするときは、カーソルをタイルの項目に合わせる。マークはそのまま。
+  func toggleTiles() {
+    tileOn.toggle()
+    if tiled {
+      snapToTile()
+    }
+  }
+
+  /// カーソルがタイルの項目になければ、後ろ（なければ前）の一番近いタイルの項目に合わせる。
+  private func snapToTile() {
+    guard cursor >= 0, cursor < entries.count, !tileable(entries[cursor]) else {
+      return
+    }
+    let next = entries.indices.first { $0 > cursor && tileable(entries[$0]) } ?? entries.indices.last { $0 < cursor && tileable(entries[$0]) }
+    if let next {
+      cursor = next
+    }
+  }
+
+  /// タイル表示のサムネイル。作れなければ nil。
+  func thumbnail(_ entry: Entry, _ kind: PreviewKind) async -> NSImage? { nil }
+
+  /// サムネイルを作らずに、タイルに代わりに出す文（大きすぎる動画など）。作るなら nil。
+  func thumbnailNote(_ entry: Entry, _ kind: PreviewKind) -> String? { nil }
+
+  /// タイルの大きさ（桁・行）。名前の1行と、画像の行。右と下の1つずつは、タイルの間を空ける分。
+  private static let tileWidth = 22
+  private static let tileHeight = 11
+
+  /// 枠の中に、画像・動画のタイルを並べる（[x]・[y] から幅 [width]・[rows] 行）。各タイルの左上はマークのチェックボックス。
+  private func drawTiles(_ screen: Screen, _ x: Int, _ y: Int, _ width: Int, _ rows: Int, focused: Bool) {
+    let bg = Style()
+    let tiles = tileIndices
+    if tiles.isEmpty {
+      visibleRows = rows
+      screen.text(x + 1, y, tr("tiles.empty"), bg.copyWith(fg: Palette.muted))
+      return
+    }
+    let columns = max(1, width / Self.tileWidth)
+    let tileW = width / columns
+    let tileH = max(3, min(rows, Self.tileHeight))
+    let visibleTileRows = max(1, rows / tileH)
+    tileColumns = columns
+    visibleRows = columns * visibleTileRows
+    let rowCount = (tiles.count + columns - 1) / columns
+    let cursorRow = (tiles.firstIndex(of: cursor) ?? 0) / columns
+    tileScroll = fitScroll(cursor: cursorRow, scroll: tileScroll, length: rowCount, rows: visibleTileRows)
+    var wanted: [(id: String, make: () async -> NSImage?)] = []
+    // 項目を描いたタイルの位置（ドラッグで渡すパスを引くため）。
+    var placed: [(x: Int, y: Int, entry: Entry)] = []
+    for row in 0..<visibleTileRows {
+      for column in 0..<columns {
+        let index = (tileScroll + row) * columns + column
+        guard index < tiles.count else {
+          break
+        }
+        let entry = entries[tiles[index]]
+        let kind = previewKindOf(entry.name)!
+        let tx = x + column * tileW
+        let ty = y + row * tileH
+        placed.append((tx, ty, entry))
+        // 選んでいない窓のカーソルのタイルは、同じ色を8割透かす。
+        let style = tiles[index] == cursor ? bg.copyWith(bg: focused ? selection : selection.withOpacity(0.2)) : bg
+        screen.fill(tx, ty, tileW - 1, tileH - 1, style)
+        let marked = isMarked(entry)
+        screen.text(tx, ty, marked ? "[x]" : "[ ]", style.copyWith(fg: Palette.marked, bold: true))
+        screen.text(tx + 4, ty, truncate(entry.name, max(0, tileW - 5)), style.copyWith(fg: marked ? Palette.marked : fileColor, bold: marked))
+        // 画像は、名前の下から、タイルの間の1行・1桁の手前まで。
+        let (ix, iy, iw, ih) = (tx + 1, ty + 1, max(1, tileW - 3), max(1, tileH - 2))
+        let muted = style.copyWith(fg: Palette.muted)
+        if let note = thumbnailNote(entry, kind) {
+          screen.text(ix, iy, truncate(note, iw), muted)
+          continue
+        }
+        let id = "\(keyOf(entry))|\(entry.size.map(String.init) ?? "null")|\(entry.modified.map { "\($0.timeIntervalSince1970)" } ?? "null")"
+        switch tileImages.image(id) {
+        case .some(.some(let image)):
+          // 画像か動画かを、右下の印で見分けられるようにする。
+          screen.images.append(ScreenImage(ix, iy, iw, ih, image, badge: kind == .video ? "🎬" : "🪟"))
+        case .some(.none):
+          screen.text(ix, iy, truncate(tr("preview_overlay.unavailable"), iw), muted)
+        case .none:
+          screen.text(ix, iy, truncate(tr("preview_overlay.loading"), iw), muted)
+          wanted.append((id, { [weak self] in await self?.thumbnail(entry, kind) ?? nil }))
+        }
+      }
+    }
+    tileImages.request(wanted)
+    if dragsFiles {
+      screen.filesAt = { [weak self] cx, cy in
+        guard let self, let tile = placed.first(where: { cx >= $0.x && cx < $0.x + tileW && cy >= $0.y && cy < $0.y + tileH }) else {
+          return nil
+        }
+        return dragPaths(tile.entry)
+      }
+    }
+    // スクロール位置。
+    if rowCount > visibleTileRows {
+      let thumb = Int((Double(tileScroll) / Double(rowCount - visibleTileRows) * Double(rows - 1)).rounded())
+      screen.text(x + width, y + thumb, "┃", bg.copyWith(fg: accent))
     }
   }
 
@@ -414,6 +562,10 @@ class Pane {
         screen.text(x + 1, y + i, lines[i], bg.copyWith(fg: Palette.error))
       }
       screen.text(x + 1, y + min(lines.count, rows - 2) + 1, tr("pane.reload_hint"), bg.copyWith(fg: Palette.muted))
+      return
+    }
+    if tiled {
+      drawTiles(screen, x, y, width, rows, focused: focused)
       return
     }
     if entries.isEmpty {
@@ -526,8 +678,6 @@ class Pane {
   /// C・M（F2・F3）で選べるか（[makeClip] を持ち、読むだけの場所でない）。
   var canClip: Bool { false }
 
-  // ---- ほかのアプリとのファイルの受け渡し（GUI 版のドラッグ&ドロップ） ----
-
   /// 一覧の行を CapsLock 中のドラッグでほかのアプリに渡せ、ほかのアプリからのドロップを受け取るか。
   var dragsFiles: Bool { false }
 
@@ -544,6 +694,8 @@ class PathPane: Pane {
   var dirPath: String { fatalError("dirPath") }
 
   var showHidden = false
+
+  override var canTile: Bool { true }
 
   /// [path] のフォルダーへ移り、[focus] の名前にカーソルを合わせる。
   func goToDir(_ path: String, focus: String? = nil) async {}

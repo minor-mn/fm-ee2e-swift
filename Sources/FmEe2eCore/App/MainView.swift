@@ -289,7 +289,6 @@ final class MainView: View, Workspace {
     app.activeTheme = active.themeKey
     // プレビューは、選んでいる窓と反対側の窓に重ねる。
     let target = previewTarget()
-    // 窓は、タブの見た目（GUI 版では文字の大きさも）で描く。
     screen.layer(0, 4, leftWidth, paneHeight, theme: left.themeKey, framed: true) { s in
       left.draw(s, 0, 0, s.width, s.height, focused: !rightActive, accentBorder: !rightActive)
       setFileDrop(s, left)
@@ -338,7 +337,7 @@ final class MainView: View, Workspace {
     }
   }
 
-  /// 選んでいる窓（ローカル・iCloud Drive・SSH）でカーソルが画像か動画（SSH は画像だけ）に乗っていて、
+  /// 選んでいる窓（ローカル・iCloud Drive・SSH・Google Drive）でカーソルが画像か動画（SSH は画像だけ、Google Drive の動画は小さいものだけ）に乗っていて、
   /// プレビューを反対側の窓に重ねられるとき、その窓と項目と種類。左のローカルで選んでいて右が SSH のときは重ねない。
   private func previewTarget() -> (Pane, Entry, PreviewKind)? {
     if active is TransfersPane {
@@ -351,6 +350,7 @@ final class MainView: View, Workspace {
       case .icloud: source = icloud
       case .ssh: source = ssh
       case .container: source = container
+      case .drive: source = drive
       default: source = nil
       }
     } else {
@@ -371,6 +371,7 @@ final class MainView: View, Workspace {
       ("char:l", "L", "reLoad"),
       ("char:s", "S", "Shell"),
       ("char:v", "V", "preView [\(preview.on ? "on" : "off")]"),
+      ("ctrl:t", "Ctrl+T", "Tile [\(active.tiled ? "on" : "off")]"),
       ("char:z", "Z", "Zip"),
       ("char:u", "U", "Unzip"),
       ("char:.", ".", "Hidden [\(hidden ? "on" : "off")]"),
@@ -380,7 +381,9 @@ final class MainView: View, Workspace {
     if config.leftTabs.count > 1 || transfersPane != nil {
       keys.append(("backTab", "Shift+Tab", tr("main_view.keys.left_tab")))
     }
-    keys.append(("left", "←→", tr("main_view.keys.switch_pane")))
+    if !active.tiled {
+      keys.append(("left", "←→", tr("main_view.keys.switch_pane")))
+    }
     keys.append(("ctrl:l", "Ctrl+L", "Location"))
     keys.append(("char:o", "O", "clOse"))
     drawKeyHints(screen, y, keys.filter { canPress($0.0) }.map { ($0.1, operationLabel($0.0, fallback: $0.2)) }, note: c.map {
@@ -398,10 +401,10 @@ final class MainView: View, Workspace {
     // iCloud Drive・右のローカルはコピー。向き（左→右・右→左）は名前の矢印で見せる。
     // 選んでいる窓で使えないキーは、名前を出さずに空ける（キーの位置は変えない）。
     let keys = functionKeys.map { key -> (String, String)? in
-      guard let (label, character) = key else { return nil }
-      let id = "char:\(character.lowercased())"
+      guard let (label, id) = key else { return nil }
       guard canPress(id) else { return nil }
-      return (operationLabel(id, fallback: label), character)
+      // 同じ動きの文字キーなら、その文字を強める（Ctrl+T などは強めない）。
+      return (operationLabel(id, fallback: label), id.hasPrefix("char:") ? String(id.dropFirst(5)).uppercased() : "")
     }
     drawFunctionKeys(screen, y, keys + [canPress("char:g") ? (transferCommand?.label ?? "", "G") : nil])
   }
@@ -430,6 +433,8 @@ final class MainView: View, Workspace {
     switch id {
     case "char:c", "char:m", "f2", "f3":
       return pane.canClip
+    case "ctrl:t":
+      return pane.canTile
     case "char: ":
       return pane.canMark
     default:
@@ -503,11 +508,13 @@ final class MainView: View, Workspace {
       return
     }
     let page = max(1, pane.visibleRows)
+    // タイル表示では、↑↓ はタイルの1行分、←→ は1つずつ動かす（左右の窓は切り替えない）。
+    let line = pane.tiled ? pane.tileColumns : 1
     switch key.name {
     case "up":
-      pane.move(-1)
+      pane.move(-line)
     case "down":
-      pane.move(1)
+      pane.move(line)
     case "pageUp":
       pane.move(-page)
     case "pageDown":
@@ -539,9 +546,17 @@ final class MainView: View, Workspace {
     case "backTab":
       switchLeft()
     case "left":
-      rightActive = false
+      if pane.tiled {
+        pane.move(-1)
+      } else {
+        rightActive = false
+      }
     case "right":
-      rightActive = true
+      if pane.tiled {
+        pane.move(1)
+      } else {
+        rightActive = true
+      }
     case "backspace":
       run { await pane.up() }
     case "f2":
@@ -550,8 +565,19 @@ final class MainView: View, Workspace {
       setClip(move: true)
     case "char":
       handleChar(key)
+    case "f10":
+      toggleTiles(pane)
+    case "ctrl" where key.ctrl == "t":
+      toggleTiles(pane)
     default:
       break
+    }
+  }
+
+  /// [pane] のタイル表示と一覧を切り替える（Ctrl+T・F10）。
+  private func toggleTiles(_ pane: Pane) {
+    if pane.canTile {
+      pane.toggleTiles()
     }
   }
 

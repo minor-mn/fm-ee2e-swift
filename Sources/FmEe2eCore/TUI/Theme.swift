@@ -42,7 +42,6 @@ nonisolated struct ThemeColors: Sendable {
   /// 選んでいる窓のカーソルの行の地。nil ならタブごとの元の色。
   var selection: Rgb?
 
-  /// 透明度つき（#RRGGBBAA）で書いた色の透明度（色の値ごと）。GUI 版で地を塗るときに使う。
   var alphas: [Int: Double] = [:]
 
   /// 上の帯（タイトルの枠）の中の背景の色。nil なら塗らない（窓全体の背景が見える）。

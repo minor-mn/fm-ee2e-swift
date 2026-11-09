@@ -34,7 +34,6 @@ class Modal: View {
 
   var frame: ModalFrame { .dialog }
 
-  /// この画面の見た目。窓全体と違えば、その見た目（GUI 版では文字の大きさも）で描く。
   var themeKey: ThemeKey { .window }
 
   /// 見出しの色。

@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 
 /// SSH の接続先のファイル。右のタブにも左のタブにも出し、左右で別々に接続する。つなぐ前は ~/.ssh/config の Host を並べる。
 class SshPane: PathPane {
@@ -16,6 +16,22 @@ class SshPane: PathPane {
 
   /// つないで、ファイルの一覧を出している。
   private var browsing: Bool { ssh != nil }
+
+  override var canTile: Bool { browsing }
+
+  override func tileable(_ entry: Entry) -> Bool { super.tileable(entry) && entry.data is RemoteEntry }
+
+  /// 動画は、ファイルをまるごと読まないと1コマも出せないので作らない（プレビューと同じ）。
+  override func thumbnailNote(_ entry: Entry, _ kind: PreviewKind) -> String? {
+    kind == .video ? tr("tiles.video_unavailable") : nil
+  }
+
+  override func thumbnail(_ entry: Entry, _ kind: PreviewKind) async -> NSImage? {
+    guard kind == .image, let ssh else {
+      return nil
+    }
+    return (try? await ssh.run("cat \(shQuote(pathOf(entry)))")).flatMap(makeThumbnail)
+  }
 
   /// S で打ったコマンド（接続先ごと、古い順）。↑↓ でたどる。アプリを閉じれば消え、どこにも書き込まない。
   var commandHistory: [String: [String]] = [:]
@@ -430,7 +446,6 @@ class SshPane: PathPane {
 
   /// [connection] のマスターの接続を閉じる。[Ssh.via] の接続先に作ったソケットのフォルダーも消す
   /// （つなぐ元の接続が切れていれば消せないが、マスターは1時間使わなければ閉じる）。
-  /// パスワードなどを、枠の中の端末で聞いてつなぐ（GUI 版）。失敗したら出力を残して Enter を待つ。終了コードを返す。
   private func connectInTerminal(_ connection: Ssh) async throws -> Int {
     let (executable, args) = try connection.connectCommand()
     return await runInTerminal(app, "$ ssh \(connection.host)", executable, args, waitAfterExit: { $0 != 0 })

@@ -100,6 +100,8 @@
         "R              名前の変更",
         "K              mkdir (空のフォルダーを作る)",
         "T              touch (空のファイルを作る)",
+        "Ctrl+T / F10   開いているフォルダーの画像・動画だけをタイル表示 (on・off)",
+        "               タイルの左上はマークのチェックボックス (Space で入れる・外す)。←→↑↓ でタイルを移動",
         "Z              圧縮 (zip / tar.gz / tar.xz をカレントに作る。",
         "               SSH は接続先の zip・tar・gzip・xz で作れる形式だけ)",
         "U              カーソルの .zip .tar.gz .tar.xz をカレントに展開",
@@ -107,7 +109,7 @@
         "Ctrl+L         ディレクトリへ移動 (↑↓ で、Ctrl+L で移動したディレクトリの履歴)",
         "~              ホームへ移動",
         ".              隠しファイルを表示",
-        "V              画像・動画のプレビューを反対側の窓に出す (on・off。SSH は画像だけ)",
+        "V              画像・動画のプレビューを反対側の窓に出す (on・off。SSH は画像だけ、Google Drive の動画は 10MB 以下だけ)",
         "O              SSH は切断、Container は一覧に戻る",
         "L              再読み込み",
         "H / ?          このヘルプを表示",
@@ -130,8 +132,14 @@
   preview_overlay: {
     unavailable: "プレビューできません",
     loading: "読み込み中…",
+    too_large: "動画が大きすぎるのでプレビューしません（Google Drive は {size} まで）",
   },
-  // GUI 版
+  // タイル表示（Ctrl+T）
+  tiles: {
+    empty: "画像・動画がありません",
+    too_large: "大きすぎます",
+    video_unavailable: "動画は出せません",
+  },
   gui_app: {
     config_reload_failed: "~/.config/fm-ee2e/config.json5 を読み込めません。今の設定のままです。\n{error}",
     // メニュー
@@ -265,6 +273,7 @@
     compress_message: "{count}項目を {place} に圧縮します。ファイル名",
     compressing: "圧縮中…",
     compressing_count: "圧縮中…（{done}/{total}）{name}",
+    compress_cancelled: "「{name}」の圧縮をやめました。",
     ssh_unavailable: "{host} には zip も tar（gzip・xz）もないので、圧縮できません。",
     reading: "「{name}」を読み込み中…",
     extract_title: "展開",
@@ -277,6 +286,7 @@
     keep_existing: "今あるファイルは残す",
     extracting: "「{name}」を展開中…",
     extracting_count: "「{archive}」を展開中…（{done}/{total}）{name}",
+    extract_cancelled: "「{name}」の展開をやめました（展開した分は残っています）。",
   },
   // 削除
   delete: {

@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 
 class LocalPane: PathPane {
   override var commands: [Operation: Command] {
@@ -232,6 +232,10 @@ class LocalPane: PathPane {
   /// [entry] のプレビュー用の名前。変わったら作り直す。
   func previewId(_ entry: Entry) -> String {
     "\(p.join(location, entry.name))|\(entry.size.map(String.init) ?? "null")|\(entry.modified.map { "\($0.timeIntervalSince1970)" } ?? "null")"
+  }
+
+  override func thumbnail(_ entry: Entry, _ kind: PreviewKind) async -> NSImage? {
+    (try? await preview(entry) { path in await makeThumbnail(path) }) ?? nil
   }
 
   /// [entry] のファイルから [make] でプレビューを作る。圧縮ファイルの中のものは取り出して作る。作れなければ nil。

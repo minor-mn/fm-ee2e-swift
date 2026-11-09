@@ -139,7 +139,6 @@ final class App {
       // 画像はダイアログより上に出てしまうので、ダイアログを開いている間は出さない。
       screen.removeImages()
     }
-    // ダイアログは、透明な画面に描いて重ねる（GUI 版では、下の窓の文字の大きさが違っても上に出る）。
     for modal in modals {
       screen.removeCursors()
       screen.layer(0, 0, screen.width, screen.height, theme: .window, clear: true) { modal.draw($0) }

@@ -100,6 +100,8 @@
         "R              Rename",
         "K              mkdir (create an empty folder)",
         "T              touch (create an empty file)",
+        "Ctrl+T / F10   Show only the images and videos in the current folder as tiles (on/off)",
+        "               The checkbox at each tile’s top left is its mark (Space toggles it). ←→↑↓ move between tiles",
         "Z              Compress (create zip / tar.gz / tar.xz in the current folder;",
         "               SSH: only formats the host’s zip, tar, gzip, xz can create)",
         "U              Extract the .zip .tar.gz .tar.xz at the cursor into the current folder",
@@ -107,7 +109,7 @@
         "Ctrl+L         Go to a directory (↑↓ for the directories you went to with Ctrl+L)",
         "~              Go home",
         ".              Show hidden files",
-        "V              Preview images and videos in the other pane (on/off; SSH: images only)",
+        "V              Preview images and videos in the other pane (on/off; SSH: images only; Google Drive: videos up to 10MB)",
         "O              Disconnect SSH / return to the Container list",
         "L              Reload",
         "H / ?          Show this help",
@@ -130,8 +132,14 @@
   preview_overlay: {
     unavailable: "Can’t preview",
     loading: "Loading…",
+    too_large: "Video too large to preview (Google Drive: up to {size})",
   },
-  // GUI version
+  // Tile view (Ctrl+T)
+  tiles: {
+    empty: "No images or videos",
+    too_large: "Too large",
+    video_unavailable: "Can’t show videos",
+  },
   gui_app: {
     config_reload_failed: "Can’t read ~/.config/fm-ee2e/config.json5. Keeping the current settings.\n{error}",
     // Menu
@@ -265,6 +273,7 @@
     compress_message: "Compress {count} items into {place}. File name",
     compressing: "Compressing…",
     compressing_count: "Compressing… ({done}/{total}) {name}",
+    compress_cancelled: "Stopped compressing “{name}”.",
     ssh_unavailable: "{host} has neither zip nor tar (gzip, xz), so it can’t compress.",
     reading: "Reading “{name}”…",
     extract_title: "Extract",
@@ -277,6 +286,7 @@
     keep_existing: "Keep existing files",
     extracting: "Extracting “{name}”…",
     extracting_count: "Extracting “{archive}”… ({done}/{total}) {name}",
+    extract_cancelled: "Stopped extracting “{name}” (files already extracted are kept).",
   },
   // Delete
   delete: {
