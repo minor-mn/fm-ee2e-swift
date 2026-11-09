@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 
 /// Google Drive の状態。フォルダーと鍵がそろって [ready] になるまで、タブの中に案内を出す。
 enum DriveState { case checking, notInstalled, noKey, badKey, unavailable, ready }
@@ -471,6 +471,37 @@ final class DrivePane: PathPane {
     let probe = p.join(dir, name)
     FileManager.default.createFile(atPath: probe, contents: nil)
     return await shouldEditInTerminal(probe)
+  }
+
+  /// 動画をプレビューする大きさの上限（バイト）。手元から外したファイルは、まるごとダウンロードして復号するため。
+  static let videoPreviewLimit = 10 * 1024 * 1024
+
+  /// [entry] が [videoPreviewLimit] を超える動画で、プレビューしないか。
+  func tooLargeToPreview(_ entry: Entry, _ kind: PreviewKind) -> Bool {
+    kind == .video && (entry.size ?? Int.max) > Self.videoPreviewLimit
+  }
+
+  override func thumbnailNote(_ entry: Entry, _ kind: PreviewKind) -> String? {
+    tooLargeToPreview(entry, kind) ? tr("tiles.too_large") : nil
+  }
+
+  override func thumbnail(_ entry: Entry, _ kind: PreviewKind) async -> NSImage? {
+    (try? await preview(entry) { path in await makeThumbnail(path) }) ?? nil
+  }
+
+  /// [entry] のファイルから [make] でプレビューを作る。暗号化したものは一時フォルダーに復号して作り、作り終えたら消す。
+  func preview<T>(_ entry: Entry, _ make: (_ path: String) async throws -> T?) async throws -> T? {
+    let path = pathOf(entry)
+    if !Self.isEncrypted(path) {
+      return try await make(path)
+    }
+    let dir = try makeTempDir("fm-ee2e-preview-")
+    defer {
+      try? FileManager.default.removeItem(atPath: dir)
+    }
+    let plain = p.join(dir, "preview\(p.extension(entry.name))")
+    try await format!.decrypt(from: path, to: plain, key: key!)
+    return try await make(plain)
   }
 
   /// 先頭が暗号化ファイルのマジックか。
