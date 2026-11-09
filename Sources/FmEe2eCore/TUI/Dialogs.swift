@@ -982,6 +982,25 @@ extension App {
     try await withUpdatingProgress(message) { _ in try await action() }
   }
 
+  /// [withUpdatingProgress] と同じく「処理中」を表示し、[cancellable] なら Esc で [action] の Task を取り消す
+  /// （外部コマンドは [runProcess] が止める）。取り消したときは、[action] が途中で失敗しても [CancellationError] を投げる。
+  func withCancellableProgress<T>(
+    _ message: String,
+    cancellable: Bool,
+    _ action: @escaping (_ update: @escaping (String) -> Void) async throws -> T
+  ) async throws -> T {
+    var task: Task<T, Error>?
+    return try await withUpdatingProgress(message, onEscape: cancellable ? { task?.cancel() } : nil) { update in
+      let running = Task { try await action(update) }
+      task = running
+      do {
+        return try await running.value
+      } catch {
+        throw running.isCancelled ? CancellationError() : error
+      }
+    }
+  }
+
   /// [withProgress] と同じく「処理中」を表示し、[action] に渡す update で文言を変えられる（「3/5 件目」など）。
   /// [onEscape] を渡すと、Esc で呼ぶ（[action] を止めるのは呼ばれた側）。
   func withUpdatingProgress<T>(
