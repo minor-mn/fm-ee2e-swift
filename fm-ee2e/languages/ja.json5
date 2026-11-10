@@ -96,6 +96,8 @@
         "D / Del        削除 (ゴミ箱へ移動。SSH は rm で削除)",
         "A              権限変更",
         "S              シェル (コマンドを入れて枠の中で実行。終わったら Enter で戻る)",
+        "               入力欄で Shift+Enter なら、ブックマーク (B の一覧) に入れてから実行",
+        "B              コマンドのブックマーク (Enter: シェルの入力欄に入れる / E: 名前・コマンドを直す / D: 消す)",
         "E              エディタ ($EDITORがなければvim固定)",
         "R              名前の変更",
         "K              mkdir (空のフォルダーを作る)",
@@ -405,6 +407,23 @@
   // シェル
   shell: {
     title: "シェル",
+    // Shift+Enter の案内
+    bookmark: "Bookmark&OK",
+  },
+  // コマンドのブックマーク（B）
+  bookmarks: {
+    title: "ブックマーク",
+    empty: "ブックマークがありません。S の入力欄で Shift+Enter で実行すると、ブックマークします。",
+    hint_run: "シェルに入れる",
+    hint_edit: "編集",
+    hint_delete: "削除",
+    edit_title: "ブックマークの編集",
+    name: "名前",
+    command: "コマンド",
+    command_required: "コマンドを入れてください。",
+    delete_title: "ブックマークの削除",
+    delete_confirm: "「{name}」をブックマークから消します。",
+    invalid_file: "{file} を読めません。",
   },
   // SSH の切断
   sign_out: {
@@ -729,8 +748,6 @@
     requires_macos: "Apple Container は macOS 26 以降で使えます。",
     not_installed: "container コマンドがありません。Apple Container をインストールしてください。",
     system_stopped: "Container のサービスが停止しています。Enter で起動します。",
-    start_system: "Container サービスの起動",
-    start_system_confirm: "Apple Container のサービスを起動しますか？",
     start: "起動",
     create: "作成",
     delete: "破棄",
@@ -768,6 +785,12 @@
       delete_button: "Delete",
       delete_confirm: "ネットワーク「{name}」を削除しますか？",
       deleted: "ネットワーク {name} を削除しました。",
+    },
+    // F12 の Command。カーソルのコンテナが動いていればその中で、止まっていればその設定で使い捨てのコンテナを作ってコマンドを実行する。
+    command: {
+      menu: "Command",
+      prompt: "{name} の設定で使い捨てのコンテナを作って実行します（終わったら消します）。",
+      prompt_exec: "動いている {name} の中で実行します。",
     },
     // F12 の「新しいイメージを取得」と「イメージを削除」。
     images: {
@@ -885,6 +908,9 @@
     delete_confirm: "「{name}」を破棄しますか？\n起動中の場合は停止してから破棄します。コンテナ内のファイルは削除されます。",
     stop: "停止",
     starting: "Container を起動中…",
+    // F12 の一番下で Apple Container のサービスを止める。ローカルの窓の F12 では、状態に合わせて起動か停止だけを出す。
+    shutdown: "Shutdown",
+    start_service: "Start",
     stopping: "Container を停止中…",
     start_confirm: "「{name}」を起動して接続しますか？",
     compose_start_confirm: "次のコンテナを起動しますか？\nまだ作成されていないものは、設定ファイルから新しく作成します。",

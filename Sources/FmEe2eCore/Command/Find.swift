@@ -30,6 +30,9 @@ nonisolated struct FindQuery: Sendable {
   func matchesName(_ name: String) -> Bool {
     (names.isEmpty || names.contains { name.contains($0) }) && (extensions.isEmpty || extensions.contains { name.hasSuffix(".\($0)") })
   }
+
+  /// 名前で探す（中身は見ない）ときは、名前の合うフォルダーも結果に出す（無視するフォルダーは出さない）。
+  var listsFolders: Bool { content.isEmpty && !names.isEmpty }
 }
 
 /// 中身の検索で出す1行。
@@ -64,7 +67,7 @@ nonisolated struct FoundLine: Sendable {
   let matches: [Range<Int>]
 }
 
-/// 見つけたファイル。中身で探したときは、合った行とその前後の行（[lines]）も持つ。
+/// 見つけたファイル（名前で探したときはフォルダーも）。中身で探したときは、合った行とその前後の行（[lines]）も持つ。
 /// 大きさなどは、接続先で読めなければ nil。
 nonisolated struct FoundItem: Sendable {
   let path: String
@@ -72,6 +75,7 @@ nonisolated struct FoundItem: Sendable {
   let modified: Date?
   let mode: Int?
   let lines: [FoundLine]
+  var isDir = false
 }
 
 /// 見つけたファイルを、パスの順（大文字小文字を区別しない）に並べる。
@@ -125,53 +129,145 @@ private nonisolated func buildFoundLines(_ hits: [Int], more: Bool, _ lineAt: (I
 
 /// [query] の条件で、[FindQuery.root] の下を探す。シンボリックリンクはたどらず、結果にも入れない。
 /// 開けないフォルダーは飛ばす。Task を取り消すと [CancellationError] を投げる。
+/// 名前で候補を集めるときは同じ深さのフォルダーをまとめて並列に読み、中身はファイルごとに並列に照らす。
 nonisolated func findFiles(_ query: FindQuery) throws -> [FoundItem] {
   let regex = query.content.isEmpty ? nil : try NSRegularExpression(pattern: query.content)
-  var results: [FoundItem] = []
-  var pending = [query.root]
-  while let dir = pending.popLast() {
-    try Task.checkCancellation()
-    guard let children = try? listDirectory(dir) else {
-      continue
-    }
-    for path in children {
-      let stat = lstatPath(path)
-      let name = p.basename(path)
-      switch stat.type {
-      case .directory:
-        if !query.ignored.contains(name) {
-          pending.append(path)
+  let wholeText = try regex.map { try NSRegularExpression(pattern: $0.pattern, options: $0.options.union(.anchorsMatchLines)) }
+  // 取り消しの状態は実行時の不可分な値なので、この関数の中なら、並列に動くスレッドから読んでよい。
+  return try withUnsafeCurrentTask { task in
+    let cancelled = FindCancelFlag(task)
+    var candidates: [FoundItem] = []
+    var level = [query.root]
+    while !level.isEmpty {
+      try Task.checkCancellation()
+      let dirs = level
+      let scanned = FindSlots<(folders: [String], items: [FoundItem])>(dirs.count, ([], []))
+      DispatchQueue.concurrentPerform(iterations: dirs.count) { index in
+        if !cancelled.isSet {
+          scanned.set(index, scanFolder(dirs[index], query))
         }
-      case .file:
-        guard query.matchesName(name) else {
-          continue
-        }
-        guard let regex else {
-          results.append(localItem(path, stat, []))
-          continue
-        }
-        try Task.checkCancellation()
-        if let lines = matchingLines(path, stat, regex), !lines.isEmpty {
-          results.append(localItem(path, stat, lines))
-        }
-      default:
-        continue
+      }
+      if cancelled.isSet {
+        throw CancellationError()
+      }
+      level = []
+      for (folders, items) in scanned.values {
+        level += folders
+        candidates += items
       }
     }
+    guard let regex, let wholeText else {
+      return sortFound(candidates)
+    }
+    // 中身は、ファイルを順に配る（大きなフォルダーが1つのスレッドに偏らないように）。
+    let files = candidates
+    let workers = max(1, ProcessInfo.processInfo.activeProcessorCount)
+    let found = FindSlots<[FoundItem]>(workers, [])
+    DispatchQueue.concurrentPerform(iterations: workers) { worker in
+      var items: [FoundItem] = []
+      for index in stride(from: worker, to: files.count, by: workers) {
+        if cancelled.isSet {
+          return
+        }
+        let file = files[index]
+        let stat = lstatPath(file.path)
+        if let lines = matchingLines(file.path, stat, regex, wholeText), !lines.isEmpty {
+          items.append(localItem(file.path, stat, lines))
+        }
+      }
+      found.set(worker, items)
+    }
+    if cancelled.isSet {
+      throw CancellationError()
+    }
+    return sortFound(found.values.flatMap { $0 })
   }
-  return sortFound(results)
 }
 
-private nonisolated func localItem(_ path: String, _ stat: FileStat, _ lines: [FoundLine]) -> FoundItem {
-  FoundItem(path: path, size: stat.size, modified: stat.modified, mode: stat.mode, lines: lines)
+/// [dir] の直下を見て、入るフォルダーと、名前の合うもの（中身はまだ見ない）。
+private nonisolated func scanFolder(_ dir: String, _ query: FindQuery) -> (folders: [String], items: [FoundItem]) {
+  var folders: [String] = []
+  var items: [FoundItem] = []
+  for (name, kind) in readEntries(dir) ?? [] {
+    let path = dir.hasSuffix("/") ? dir + name : dir + "/" + name
+    switch kind {
+    case .directory:
+      if !query.ignored.contains(name) {
+        folders.append(path)
+        if query.listsFolders && query.matchesName(name) {
+          items.append(localItem(path, lstatPath(path), [], isDir: true))
+        }
+      }
+    case .file:
+      if query.matchesName(name) {
+        // 中身で探すときは、大きさなどは照らすときに読む。
+        items.append(query.content.isEmpty ? localItem(path, lstatPath(path), []) : FoundItem(path: path, size: nil, modified: nil, mode: nil, lines: []))
+      }
+    default:
+      continue
+    }
+  }
+  return (folders, items)
 }
 
-/// 一度見つけたファイル [paths] を読み直す（エディタで書き換えたあとなど）。なくなったファイルは外し、
+/// 並列に探しているあいだの取り消し（呼んだ Task の取り消しを、ほかのスレッドから見る）。Task の外で呼ばれたら取り消さない。
+private final nonisolated class FindCancelFlag: @unchecked Sendable {
+  init(_ task: UnsafeCurrentTask?) { self.task = task }
+  private let task: UnsafeCurrentTask?
+  var isSet: Bool { task?.isCancelled ?? false }
+}
+
+/// 並列に動く処理の結果を、添え字ごとに受け取る。
+private final nonisolated class FindSlots<Value>: @unchecked Sendable {
+  init(_ count: Int, _ initial: Value) { buffer = Array(repeating: initial, count: count) }
+  private let lock = NSLock()
+  private var buffer: [Value]
+  func set(_ index: Int, _ value: Value) { lock.withLock { buffer[index] = value } }
+  var values: [Value] { lock.withLock { buffer } }
+}
+
+/// [dir] の子の名前と種類。種類は readdir の d_type で決め（1件ずつ lstat すると遅い）、わからなければ lstat で調べる。
+/// シンボリックリンクなど、ファイルでもフォルダーでもないものは nil。開けなければ全体が nil。
+private nonisolated func readEntries(_ dir: String) -> [(name: String, kind: FileSystemEntityType?)]? {
+  guard let handle = opendir(dir) else {
+    return nil
+  }
+  defer { closedir(handle) }
+  var result: [(name: String, kind: FileSystemEntityType?)] = []
+  while let entry = readdir(handle) {
+    let name = withUnsafeBytes(of: entry.pointee.d_name) { bytes in
+      String(decoding: bytes.prefix(Int(entry.pointee.d_namlen)), as: UTF8.self)
+    }
+    if name == "." || name == ".." {
+      continue
+    }
+    let kind: FileSystemEntityType?
+    switch Int32(entry.pointee.d_type) {
+    case DT_DIR: kind = .directory
+    case DT_REG: kind = .file
+    case DT_UNKNOWN:
+      let type = lstatPath(dir.hasSuffix("/") ? dir + name : dir + "/" + name).type
+      kind = type == .directory || type == .file ? type : nil
+    default: kind = nil
+    }
+    result.append((name, kind))
+  }
+  return result
+}
+
+private nonisolated func localItem(_ path: String, _ stat: FileStat, _ lines: [FoundLine], isDir: Bool = false) -> FoundItem {
+  FoundItem(path: path, size: stat.size, modified: stat.modified, mode: stat.mode, lines: lines, isDir: isDir)
+}
+
+/// 一度見つけたファイル・フォルダー [paths] を読み直す（エディタで書き換えたあとなど）。なくなったものは外し、
 /// 中身で探したときは合う行を探し直す（合わなくなっても一覧には残す）。
 nonisolated func refindFiles(_ paths: [String], _ query: FindQuery) -> [FoundItem] {
   let regex = query.content.isEmpty ? nil : try? NSRegularExpression(pattern: query.content)
   return paths.compactMap { path in
     let stat = lstatPath(path)
+    if stat.type == .directory && query.listsFolders {
+      return localItem(path, stat, [], isDir: true)
+    }
     guard stat.type == .file else {
       return nil
     }
@@ -183,10 +279,24 @@ nonisolated func refindFiles(_ paths: [String], _ query: FindQuery) -> [FoundIte
 /// それより多く合えば、最後に [FoundLine.Kind.more] を付ける（1つ多く見つけたところで探すのをやめる）。
 /// 大きすぎるファイル・読めないファイル・バイナリ（先頭に NUL がある）は nil。
 private nonisolated func matchingLines(_ path: String, _ stat: FileStat, _ regex: NSRegularExpression) -> [FoundLine]? {
-  guard stat.size <= FindQuery.contentLimit, let data = FileManager.default.contents(atPath: path), !data.prefix(8000).contains(0) else {
+  guard let wholeText = try? NSRegularExpression(pattern: regex.pattern, options: regex.options.union(.anchorsMatchLines)) else {
     return nil
   }
-  var lines = String(decoding: data, as: UTF8.self).components(separatedBy: "\n")
+  return matchingLines(path, stat, regex, wholeText)
+}
+
+/// [matchingLines]。[wholeText] は、ファイル全体で先に照らすための、^ $ を行ごとにした同じ正規表現。
+private nonisolated func matchingLines(_ path: String, _ stat: FileStat, _ regex: NSRegularExpression, _ wholeText: NSRegularExpression) -> [FoundLine]? {
+  guard stat.size <= FindQuery.contentLimit, let data = readTextFile(path) else {
+    return nil
+  }
+  // ほとんどのファイルは合わないので、先にファイル全体で1回だけ照らし、合わなければ行に分けない。
+  // ^ $ は各行の始めと終わりに合わせる（[wholeText]）。行をまたいで合うこともあるが、そのときは下の行ごとの照合で外れる。
+  let text = String(decoding: data, as: UTF8.self)
+  guard wholeText.firstMatch(in: text, options: [], range: NSRange(text.startIndex..., in: text)) != nil else {
+    return []
+  }
+  var lines = text.components(separatedBy: "\n")
   if lines.last == "" {
     lines.removeLast()
   }
@@ -201,6 +311,39 @@ private nonisolated func matchingLines(_ path: String, _ stat: FileStat, _ regex
     Array(hits.prefix(FindQuery.shownMatches)), more: hits.count > FindQuery.shownMatches,
     { $0 >= 1 && $0 <= lines.count ? lines[$0 - 1] : nil }, regex
   )
+}
+
+/// [path] の中身。先頭 [textProbe] バイトが UTF-8（ASCII を含む）でないか、NUL を含めば、テキストでないとして
+/// そこで閉じて nil（最後まで読まない）。読めなくても nil。
+private nonisolated func readTextFile(_ path: String) -> Data? {
+  guard let handle = FileHandle(forReadingAtPath: path) else {
+    return nil
+  }
+  defer { try? handle.close() }
+  guard var data = try? handle.read(upToCount: textProbe) else {
+    return Data()
+  }
+  guard looksLikeText(data, truncated: data.count == textProbe) else {
+    return nil
+  }
+  if data.count == textProbe, let rest = try? handle.readToEnd() {
+    data.append(rest)
+  }
+  return data
+}
+
+/// テキストかを見る、ファイルの先頭の大きさ。
+private let textProbe = 1024
+
+/// [head] が NUL を含まない UTF-8 か。[truncated] なら、末尾で途切れた1文字（3バイトまで）は不問にする。
+nonisolated func looksLikeText(_ head: Data, truncated: Bool) -> Bool {
+  if head.contains(0) {
+    return false
+  }
+  for cut in 0...(truncated ? min(3, head.count) : 0) where String(bytes: head.dropLast(cut), encoding: .utf8) != nil {
+    return true
+  }
+  return false
 }
 
 // ---- SSH・Container（接続先の find と grep） ----
@@ -230,7 +373,7 @@ private nonisolated func globLiteral(_ s: String) -> String {
   return out
 }
 
-/// 接続先の sh で実行する1行。出力は、ファイルごとに「\036パス\037大きさ 更新時刻 権限\037grep -n の出力」。
+/// 接続先の sh で実行する1行。出力は、ファイルごとに「\036パス\037大きさ 更新時刻 権限\037grep -n の出力」（フォルダーはパスの末尾に「/」）。
 /// 正規表現が grep -E で通らなければ \025 だけを出す。
 ///
 /// - シンボリックリンクは find の既定でたどらず、-type f で結果からも外れる。無視するフォルダーは -prune で入らない。
@@ -243,14 +386,16 @@ nonisolated func remoteFindScript(_ query: FindQuery) -> String {
     let names = query.ignored.sorted().map { "-name \(shQuote($0))" }.joined(separator: " -o ")
     filters.append("\\( -type d \\( \(names) \\) \\) -prune -o")
   }
-  filters.append("-type f")
+  // 名前で探すときはフォルダーも出す（探し始めるフォルダー「.」は除く）。
+  filters.append(query.listsFolders ? "\\( -type f -o \\( -type d ! -name . \\) \\)" : "-type f")
   if !query.names.isEmpty {
     filters.append("\\( " + query.names.map { "-name \(shQuote("*\(globLiteral($0))*"))" }.joined(separator: " -o ") + " \\)")
   }
   if !query.extensions.isEmpty {
     filters.append("\\( " + query.extensions.map { "-name \(shQuote("*.\(globLiteral($0))"))" }.joined(separator: " -o ") + " \\)")
   }
-  let record = "s=$(stat -c '%s %Y %a' -- \"$f\" 2>/dev/null); printf '\\036%s\\037%s\\037' \"$f\" \"$s\""
+  // フォルダーは、パスの末尾に「/」を付けて見分ける。
+  let record = "s=$(stat -c '%s %Y %a' -- \"$f\" 2>/dev/null); [ -d \"$f\" ] && f=\"$f/\"; printf '\\036%s\\037%s\\037' \"$f\" \"$s\""
   var script = "cd \(shQuote(query.root)) || exit 1; "
   let inner: String
   if query.content.isEmpty {
@@ -285,14 +430,18 @@ nonisolated func parseRemoteFound(_ out: Data, _ query: FindQuery) -> [FoundItem
     guard fields.count >= 2 else {
       continue
     }
-    let relative = String(decoding: fields[0], as: UTF8.self)
+    var relative = String(decoding: fields[0], as: UTF8.self)
+    let isDir = relative.hasSuffix("/")
+    if isDir {
+      relative.removeLast()
+    }
     let path = PathContext.posix.join(query.root, relative.hasPrefix("./") ? String(relative.dropFirst(2)) : relative)
     let stat = String(decoding: fields[1], as: UTF8.self).split(separator: " ")
     let size = stat.count == 3 ? Int(stat[0]) : nil
     let modified = stat.count == 3 ? Double(stat[1]).map { Date(timeIntervalSince1970: $0) } : nil
     let mode = stat.count == 3 ? Int(stat[2], radix: 8) : nil
     guard !query.content.isEmpty else {
-      items.append(FoundItem(path: path, size: size, modified: modified, mode: mode, lines: []))
+      items.append(FoundItem(path: path, size: size, modified: modified, mode: mode, lines: [], isDir: isDir))
       continue
     }
     let grep = fields.count == 3 ? fields[2] : Data()
@@ -342,7 +491,7 @@ final class FindDialog: Modal {
       InputField(),
       InputField(),
       InputField(),
-      InputField(initial: "vendor ios android"),
+      InputField(initial: "vendor ios android node_modules"),
     ]
     super.init(tr("find.title"))
   }
@@ -359,7 +508,8 @@ final class FindDialog: Modal {
     return Input(path: values[0], content: values[1], names: values[2], extensions: values[3], ignored: values[4])
   }
 
-  override func preferredWidth(_ screen: Screen) -> Int { min(screen.width - 4, 90) }
+  /// ほかの入力欄と同じ幅（[InputDialog.defaultWidth]）。
+  override func preferredWidth(_ screen: Screen) -> Int { min(screen.width - 4, InputDialog.defaultWidth) }
 
   /// 5行・空行・注意書き。
   override func bodyHeight(_ innerWidth: Int) -> Int { 7 }

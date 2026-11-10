@@ -26,6 +26,12 @@ class EditCommand: Command {
 /// ローカルの Markdown を反対側の窓にプレビュー（V）しているときは、エディタを選んでいる側の窓の場所だけに開き、
 /// プレビューを見ながら編集できるようにする（保存すればプレビューも描き直す）。
 final class PathEdit: EditCommand {
+  /// 検索の結果のフォルダーの上では使えない。
+  override func available(_ pane: Pane) -> Bool {
+    guard let path = pane as? PathPane, path.found != nil else { return true }
+    return path.current?.isDir != true
+  }
+
   override func open(_ c: CommandContext, _ target: Mark) async throws {
     let pane = c.pane as! PathPane
     if let local = pane as? LocalPane, c.workspace.previewsMarkdown(local, target.entry) {

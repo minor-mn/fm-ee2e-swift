@@ -329,9 +329,13 @@ final class InputDialog: Modal {
     history: [String] = [],
     complete: Completer? = nil,
     onChange: (() -> Void)? = nil,
+    shiftEnter: String? = nil,
+    width: Int? = nil,
     accent: Rgb = Palette.purple
   ) {
     self.close = close
+    self.shiftEnter = shiftEnter
+    self.width = width
     self.message = message
     self.validate = validate
     self.history = history
@@ -354,6 +358,18 @@ final class InputDialog: Modal {
 
   let message: String?
   let field: InputField
+
+  /// Shift+Enter でも決められるときの、その案内（Shell のブックマークして実行など）。Enter と分けないなら nil。
+  let shiftEnter: String?
+
+  /// Shift+Enter で決めた。
+  private(set) var shiftEntered = false
+
+  /// 小窓の幅（窓が狭ければ窓の幅 − 4）。nil なら入力欄の既定の幅（[defaultWidth]）。
+  let width: Int?
+
+  /// 入力欄の既定の幅。パスやコマンドを入れるので、ほかの小窓（68桁）より広くする。
+  static let defaultWidth = 100
 
   override var focusedField: InputField? { field }
 
@@ -399,6 +415,13 @@ final class InputDialog: Modal {
     return lines
   }
 
+  /// [width]（なければ [defaultWidth]）。案内（Esc・Tab・↑↓・Shift+Enter・Enter）が入らなければ、全部収まる幅に広げる
+  /// （収まらない案内は描かれないため）。
+  override func preferredWidth(_ screen: Screen) -> Int {
+    let hintsWidth = hints.reduce(0) { $0 + textWidth($1.0) + textWidth($1.1) + 2 }
+    return min(screen.width - 4, max(width ?? Self.defaultWidth, hintsWidth + 4))
+  }
+
   override func bodyHeight(_ innerWidth: Int) -> Int {
     messageLines(innerWidth).count + 2 + (error == nil ? 0 : 1) + candidateLines(innerWidth).count
   }
@@ -422,11 +445,11 @@ final class InputDialog: Modal {
   }
 
   override var hints: [(String, String)] {
-    var list: [(String, String)] = []
+    var list: [(String, String)] = [("Esc", tr("dialogs.cancel"))]
     if complete != nil { list.append(("Tab", tr("dialogs.hint.complete"))) }
     if !history.isEmpty { list.append(("↑↓", tr("dialogs.hint.history"))) }
+    if let shiftEnter { list.append(("Shift+Enter", shiftEnter)) }
     list.append(("Enter", tr("dialogs.hint.decide")))
-    list.append(("Esc", tr("dialogs.cancel")))
     return list
   }
 
@@ -440,6 +463,7 @@ final class InputDialog: Modal {
       if let error = validate?(value) {
         self.error = error
       } else {
+        shiftEntered = key.shift && shiftEnter != nil
         close(value)
       }
       return
@@ -513,6 +537,9 @@ final class InputDialog: Modal {
 
 /// 実行ファイルに渡す引数の入力。Tab で入力欄・実行・キャンセルを移動する。
 final class ExecDialog: Modal {
+  /// ほかの入力欄と同じ幅（[InputDialog.defaultWidth]）。
+  override func preferredWidth(_ screen: Screen) -> Int { min(screen.width - 4, InputDialog.defaultWidth) }
+
   init(_ name: String, _ directory: String, _ close: @escaping (String?) -> Void) {
     self.name = name
     self.directory = directory
@@ -954,6 +981,35 @@ extension App {
         onChange: { [unowned self] in requestRender() }
       )
     }
+  }
+
+  /// [input] の、Enter のほかに Shift+Enter でも決められるもの（案内は [shiftEnter]）。
+  /// 決めた文字列と、Shift+Enter で決めたかを返す。キャンセルなら nil。
+  func inputWithShiftEnter(
+    _ title: String,
+    shiftEnter: String,
+    width: Int? = nil,
+    message: String? = nil,
+    initial: String = "",
+    history: [String] = [],
+    complete: Completer? = nil
+  ) async -> (String, Bool)? {
+    var dialog: InputDialog?
+    let value: String? = await showModal { close in
+      let shown = InputDialog(
+        title, close,
+        message: message,
+        initial: initial,
+        history: history,
+        complete: complete,
+        onChange: { [unowned self] in requestRender() },
+        shiftEnter: shiftEnter,
+        width: width
+      )
+      dialog = shown
+      return shown
+    }
+    return value.map { ($0, dialog?.shiftEntered ?? false) }
   }
 
   /// [options] から1つ選ばせ、その番号を返す。キャンセルなら nil。

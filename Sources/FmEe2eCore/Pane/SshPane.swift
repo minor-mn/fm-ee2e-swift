@@ -266,7 +266,7 @@ class SshPane: PathPane {
   }
 
   override func foundData(_ item: FoundItem) -> Any {
-    RemoteEntry(name: PathContext.posix.basename(item.path), isDir: false, size: item.size, modified: item.modified, mode: item.mode.map { $0 & 0xfff })
+    RemoteEntry(name: PathContext.posix.basename(item.path), isDir: item.isDir, size: item.size, modified: item.modified, mode: item.mode.map { $0 & 0xfff })
   }
 
   override func fetchUsage() async throws -> DiskUsage? { try await ssh?.usage(dir) }
@@ -290,7 +290,12 @@ class SshPane: PathPane {
 
   override func open(_ entry: Entry) async {
     do {
-      // 検索の結果のファイルは、画像・動画はダウンロードして開き、ほかは接続先のエディタで開く（圧縮ファイルの中には入らない）。
+      // 検索の結果のフォルダーは、結果を閉じてそこへ移る。
+      // ファイルは、画像・動画はダウンロードして開き、ほかは接続先のエディタで開く（圧縮ファイルの中には入らない）。
+      if let folder = leaveFoundForFolder(entry) {
+        try await goTo(folder)
+        return
+      }
       if found != nil {
         if previewKindOf(entry.name) != nil {
           try await openDownloaded(entry)

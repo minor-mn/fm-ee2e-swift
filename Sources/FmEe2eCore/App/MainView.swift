@@ -370,6 +370,7 @@ final class MainView: View, Workspace {
       ("char:h", "H", "Help"),
       ("char:l", "L", "reLoad"),
       ("char:s", "S", "Shell"),
+      ("char:b", "B", "Bookmark"),
       ("char:v", "V", "preView [\(preview.on ? "on" : "off")]"),
       ("ctrl:t", "Ctrl+T", "Tile [\(active.tiled ? "on" : "off")]"),
       ("char:z", "Z", "Zip"),
@@ -424,7 +425,7 @@ final class MainView: View, Workspace {
       return false
     }
     if let operation = operationForKey(id) {
-      guard let command = operation == .transfer ? transferCommand : pane.commands[operation] else {
+      guard let command = operation == .transfer ? transferCommand : operation == .bookmarks ? bookmarksCommand : pane.commands[operation] else {
         return false
       }
       // 切断（O）は、SSH でつないでいるときだけ。
@@ -444,6 +445,9 @@ final class MainView: View, Workspace {
       return true
     }
   }
+
+  /// 選んでいる窓で B を押したときのブックマークの一覧。選んでいるタブに S（Shell）があるときだけ。
+  private var bookmarksCommand: BookmarksCommand? { (active.commands[.shell] as? ShellCommand).map(BookmarksCommand.init) }
 
   /// 選んでいる窓で G・F12 を押したときに実行するコマンド。左の窓の G は右のタブが決め、右の窓の G は右のタブ自身が持つ。
   /// 左が SSH のときは、右がローカル（左の接続先との scp）・Git（Git コマンド）・SSH（左の接続先からつないだ接続先との scp）。
@@ -493,6 +497,12 @@ final class MainView: View, Workspace {
       // 左が SSH のときは、左の SSH の窓が持つ転送（左のローカルへのダウンロード）ではなく、右のタブで決まる転送にする。
       if operation == .transfer {
         if let command = transferCommand {
+          run { await runCommand(command, self) }
+        }
+        return
+      }
+      if operation == .bookmarks {
+        if let command = bookmarksCommand, command.shell.available(CommandContext(self, pane, [])) {
           run { await runCommand(command, self) }
         }
         return
@@ -647,6 +657,7 @@ final class MainView: View, Workspace {
     "char:~": .goHome,
     "char:.": .toggleHidden,
     "char:g": .transfer,
+    "char:b": .bookmarks,
   ]
 
   private func operationForKey(_ id: String) -> Operation? {

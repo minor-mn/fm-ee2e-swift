@@ -290,8 +290,10 @@ class LocalPane: PathPane {
   /// [entry] を開く。エディタで開くときは、[editFrame] の場所を覆う。
   func open(_ entry: Entry, editFrame: ModalFrame) async {
     do {
-      // 検索の結果のファイルは、エディタで編集できるものはエディタで、ほかはそのファイルのアプリで開く。
-      if found != nil {
+      // 検索の結果のフォルダーは、結果を閉じてそこへ移る。ファイルは、エディタで編集できるものはエディタで、ほかはそのファイルのアプリで開く。
+      if let folder = leaveFoundForFolder(entry) {
+        await goTo(folder)
+      } else if found != nil {
         let path = pathOf(entry)
         if await shouldEditInTerminal(path) {
           await editFile(path, frame: editFrame)

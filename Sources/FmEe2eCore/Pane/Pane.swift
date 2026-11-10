@@ -762,6 +762,16 @@ class PathPane: Pane {
     foundPaths = [:]
   }
 
+  /// 検索の結果のフォルダー [entry] の上で Enter を押したときのフォルダーのパス。結果を閉じて、そこへ移るのに使う。
+  /// フォルダーでなければ nil（結果は閉じない）。
+  func leaveFoundForFolder(_ entry: Entry) -> String? {
+    guard found != nil, entry.isDir else { return nil }
+    let path = pathOf(entry)
+    clearFound()
+    resetCursor()
+    return path
+  }
+
   /// 結果の一覧を読み直す（エディタで書き換えたあとなど）。
   func refind(_ found: Found) async throws -> [FoundItem] { [] }
 
@@ -787,8 +797,8 @@ class PathPane: Pane {
         list.append(Entry(name: "", isDir: false, data: FoundLine(.blank)))
       }
       let file = Entry(
-        name: context.basename(item.path), isDir: false, size: item.size, modified: item.modified,
-        executable: (item.mode ?? 0) & 0x49 != 0, mode: item.mode.map { $0 & 0xfff }, data: foundData(item)
+        name: context.basename(item.path), isDir: item.isDir, size: item.size, modified: item.modified,
+        executable: !item.isDir && (item.mode ?? 0) & 0x49 != 0, mode: item.mode.map { $0 & 0xfff }, data: foundData(item)
       )
       paths[ObjectIdentifier(file)] = item.path
       list.append(file)

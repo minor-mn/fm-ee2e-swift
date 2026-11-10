@@ -29,6 +29,9 @@ enum Operation: Hashable {
   /// Ctrl+C。Container タブの一覧に使う Compose ファイルを選ぶ。
   case compose
 
+  /// B。コマンドのブックマークの一覧（選んでいるタブの S のコマンドで開く。[BookmarksCommand]）。
+  case bookmarks
+
   /// G・F12。右のタブの転送（[Pane.transferCommand]）。
   case transfer
 }

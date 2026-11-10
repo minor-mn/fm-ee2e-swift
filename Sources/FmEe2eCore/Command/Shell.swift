@@ -28,23 +28,32 @@ class ShellCommand: Command {
   /// [command] を実行するプログラムと引数、作業フォルダー。
   func commandLine(_ c: CommandContext, _ command: String) throws -> (String, [String], String?) { fatalError("commandLine") }
 
-  override func run(_ c: CommandContext) async {
+  override func run(_ c: CommandContext) async { await run(c, initial: "") }
+
+  /// 入力欄に [initial] を入れて開く（ブックマーク（B）から開くときはそのコマンド）。
+  /// Enter で実行し、Shift+Enter ならそのコマンドをブックマークに足してから実行する。
+  func run(_ c: CommandContext, initial: String) async {
     if !available(c) {
       return
     }
     do {
       let place = self.place(c)
-      let command = await c.app.input(
+      let entered = await c.app.inputWithShiftEnter(
         tr("shell.title"),
+        shiftEnter: tr("shell.bookmark"),
         message: place,
+        initial: initial,
         history: try await history(c),
         complete: { before in
           let result = try await completeShellWord(before, self.completion(c))
           return result.map { ($0.before, $0.candidates) }
         }
       )
-      guard let command, !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+      guard let (command, bookmark) = entered, !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
         return
+      }
+      if bookmark {
+        try CommandBookmarks.add(command)
       }
       try await remember(c, command)
       let (executable, args, workingDirectory) = try commandLine(c, command)

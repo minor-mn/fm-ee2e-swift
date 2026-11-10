@@ -988,7 +988,8 @@ final class GridView: NSView, NSTextInputClient {
   }
 
   /// 文字以外のキーと Ctrl+キーを、端末と同じバイト列にする。文字のキーは nil（日本語入力を通す）。
-  /// [shiftedMoves] なら、Shift+矢印・Home・End を xterm と同じ修飾キーつきの形（ESC [1;2D など）にする。
+  /// [shiftedMoves] なら、Shift+矢印・Home・End を xterm と同じ修飾キーつきの形（ESC [1;2D など）に、
+  /// Shift+Enter を ESC [13;2u にする。
   private static func encode(_ event: NSEvent, shiftedMoves: Bool) -> [UInt8]? {
     let flags = event.modifierFlags
     if let special = specialKeys[event.keyCode] {
@@ -997,6 +998,10 @@ final class GridView: NSView, NSTextInputClient {
       }
       if shiftedMoves && flags.contains(.shift), let final = shiftedMoveKeys[event.keyCode] {
         return Array("\u{1b}[1;2\(final)".utf8)
+      }
+      // Shift+Enter（Shell の入力欄のブックマークして実行など）も、アプリの画面にだけ区別して送る（CSI u の形）。
+      if shiftedMoves && flags.contains(.shift) && (event.keyCode == 36 || event.keyCode == 76) {
+        return Array("\u{1b}[13;2u".utf8)
       }
       return Array(special.utf8)
     }

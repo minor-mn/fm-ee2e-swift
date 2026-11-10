@@ -168,8 +168,9 @@ final class KeyDecoder {
     "\u{1b}[14~": "f4",
   ]
 
-  /// Shift つきの矢印・Home・End（xterm の修飾キーつきの形。2 が Shift）。
+  /// Shift つきの矢印・Home・End（xterm の修飾キーつきの形。2 が Shift）と、Shift+Enter（CSI u の形）。
   private static let shiftCsiKeys: [String: String] = [
+    "\u{1b}[13;2u": "enter",
     "\u{1b}[1;2A": "up",
     "\u{1b}[1;2B": "down",
     "\u{1b}[1;2C": "right",
