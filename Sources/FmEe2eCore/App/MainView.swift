@@ -289,7 +289,6 @@ final class MainView: View, Workspace {
     app.activeTheme = active.themeKey
     // プレビューは、選んでいる窓と反対側の窓に重ねる。
     let target = previewTarget()
-    // 窓は、タブの見た目（GUI 版では文字の大きさも）で描く。
     screen.layer(0, 4, leftWidth, paneHeight, theme: left.themeKey, framed: true) { s in
       left.draw(s, 0, 0, s.width, s.height, focused: !rightActive, accentBorder: !rightActive)
       setFileDrop(s, left)
@@ -338,7 +337,7 @@ final class MainView: View, Workspace {
     }
   }
 
-  /// 選んでいる窓（ローカル・iCloud Drive・SSH）でカーソルが画像か動画（SSH は画像だけ）に乗っていて、
+  /// 選んでいる窓（ローカル・iCloud Drive・SSH・Google Drive）でカーソルが画像か動画（SSH は画像だけ、Google Drive の動画は小さいものだけ）に乗っていて、
   /// プレビューを反対側の窓に重ねられるとき、その窓と項目と種類。左のローカルで選んでいて右が SSH のときは重ねない。
   private func previewTarget() -> (Pane, Entry, PreviewKind)? {
     if active is TransfersPane {
@@ -351,6 +350,7 @@ final class MainView: View, Workspace {
       case .icloud: source = icloud
       case .ssh: source = ssh
       case .container: source = container
+      case .drive: source = drive
       default: source = nil
       }
     } else {
@@ -370,7 +370,9 @@ final class MainView: View, Workspace {
       ("char:h", "H", "Help"),
       ("char:l", "L", "reLoad"),
       ("char:s", "S", "Shell"),
+      ("char:b", "B", "Bookmark"),
       ("char:v", "V", "preView [\(preview.on ? "on" : "off")]"),
+      ("ctrl:t", "Ctrl+T", "Tile [\(active.tiled ? "on" : "off")]"),
       ("char:z", "Z", "Zip"),
       ("char:u", "U", "Unzip"),
       ("char:.", ".", "Hidden [\(hidden ? "on" : "off")]"),
@@ -380,9 +382,14 @@ final class MainView: View, Workspace {
     if config.leftTabs.count > 1 || transfersPane != nil {
       keys.append(("backTab", "Shift+Tab", tr("main_view.keys.left_tab")))
     }
-    keys.append(("left", "←→", tr("main_view.keys.switch_pane")))
+    if !active.tiled {
+      keys.append(("left", "←→", tr("main_view.keys.switch_pane")))
+    }
     keys.append(("ctrl:l", "Ctrl+L", "Location"))
     keys.append(("char:o", "O", "clOse"))
+    if let label = active.escapeLabel {
+      keys.insert(("escape", "Esc", label), at: 0)
+    }
     drawKeyHints(screen, y, keys.filter { canPress($0.0) }.map { ($0.1, operationLabel($0.0, fallback: $0.2)) }, note: c.map {
       tr("main_view.clip.note", ["action": $0.move ? tr("main_view.clip.move") : tr("main_view.clip.copy"), "count": $0.length])
     })
@@ -398,10 +405,10 @@ final class MainView: View, Workspace {
     // iCloud Drive・右のローカルはコピー。向き（左→右・右→左）は名前の矢印で見せる。
     // 選んでいる窓で使えないキーは、名前を出さずに空ける（キーの位置は変えない）。
     let keys = functionKeys.map { key -> (String, String)? in
-      guard let (label, character) = key else { return nil }
-      let id = "char:\(character.lowercased())"
+      guard let (label, id) = key else { return nil }
       guard canPress(id) else { return nil }
-      return (operationLabel(id, fallback: label), character)
+      // 同じ動きの文字キーなら、その文字を強める（Ctrl+T などは強めない）。
+      return (operationLabel(id, fallback: label), id.hasPrefix("char:") ? String(id.dropFirst(5)).uppercased() : "")
     }
     drawFunctionKeys(screen, y, keys + [canPress("char:g") ? (transferCommand?.label ?? "", "G") : nil])
   }
@@ -418,7 +425,7 @@ final class MainView: View, Workspace {
       return false
     }
     if let operation = operationForKey(id) {
-      guard let command = operation == .transfer ? transferCommand : pane.commands[operation] else {
+      guard let command = operation == .transfer ? transferCommand : operation == .bookmarks ? bookmarksCommand : pane.commands[operation] else {
         return false
       }
       // 切断（O）は、SSH でつないでいるときだけ。
@@ -430,12 +437,17 @@ final class MainView: View, Workspace {
     switch id {
     case "char:c", "char:m", "f2", "f3":
       return pane.canClip
+    case "ctrl:t":
+      return pane.canTile
     case "char: ":
       return pane.canMark
     default:
       return true
     }
   }
+
+  /// 選んでいる窓で B を押したときのブックマークの一覧。選んでいるタブに S（Shell）があるときだけ。
+  private var bookmarksCommand: BookmarksCommand? { (active.commands[.shell] as? ShellCommand).map(BookmarksCommand.init) }
 
   /// 選んでいる窓で G・F12 を押したときに実行するコマンド。左の窓の G は右のタブが決め、右の窓の G は右のタブ自身が持つ。
   /// 左が SSH のときは、右がローカル（左の接続先との scp）・Git（Git コマンド）・SSH（左の接続先からつないだ接続先との scp）。
@@ -489,12 +501,22 @@ final class MainView: View, Workspace {
         }
         return
       }
+      if operation == .bookmarks {
+        if let command = bookmarksCommand, command.shell.available(CommandContext(self, pane, [])) {
+          run { await runCommand(command, self) }
+        }
+        return
+      }
       if let command = pane.commands[operation] {
         run { await runCommand(command, self) }
       }
       return
     }
-    // Esc は、C・M で選んでいればそれを取り消す（どのタブでも）。
+    // Esc は、検索の結果などを出していればそれを閉じ、なければ C・M で選んだものを取り消す（どのタブでも）。
+    if key.name == "escape", pane.escapeLabel != nil {
+      run { await pane.closeByEscape() }
+      return
+    }
     if key.name == "escape" {
       clip = nil
       return
@@ -503,11 +525,13 @@ final class MainView: View, Workspace {
       return
     }
     let page = max(1, pane.visibleRows)
+    // タイル表示では、↑↓ はタイルの1行分、←→ は1つずつ動かす（左右の窓は切り替えない）。
+    let line = pane.tiled ? pane.tileColumns : 1
     switch key.name {
     case "up":
-      pane.move(-1)
+      pane.move(-line)
     case "down":
-      pane.move(1)
+      pane.move(line)
     case "pageUp":
       pane.move(-page)
     case "pageDown":
@@ -539,9 +563,17 @@ final class MainView: View, Workspace {
     case "backTab":
       switchLeft()
     case "left":
-      rightActive = false
+      if pane.tiled {
+        pane.move(-1)
+      } else {
+        rightActive = false
+      }
     case "right":
-      rightActive = true
+      if pane.tiled {
+        pane.move(1)
+      } else {
+        rightActive = true
+      }
     case "backspace":
       run { await pane.up() }
     case "f2":
@@ -550,8 +582,19 @@ final class MainView: View, Workspace {
       setClip(move: true)
     case "char":
       handleChar(key)
+    case "f10":
+      toggleTiles(pane)
+    case "ctrl" where key.ctrl == "t":
+      toggleTiles(pane)
     default:
       break
+    }
+  }
+
+  /// [pane] のタイル表示と一覧を切り替える（Ctrl+T・F10）。
+  private func toggleTiles(_ pane: Pane) {
+    if pane.canTile {
+      pane.toggleTiles()
     }
   }
 
@@ -597,7 +640,6 @@ final class MainView: View, Workspace {
     "f6": .mkdir,
     "f7": .rename,
     "f8": .edit,
-    "f9": .format,
     "f12": .transfer,
     "ctrl:l": .goToPath,
     "char:p": .paste,
@@ -608,7 +650,6 @@ final class MainView: View, Workspace {
     "char:r": .rename,
     "char:k": .mkdir,
     "char:t": .touch,
-    "char:f": .format,
     "char:z": .compress,
     "char:u": .extract,
     "char:o": .signOut,
@@ -616,10 +657,18 @@ final class MainView: View, Workspace {
     "char:~": .goHome,
     "char:.": .toggleHidden,
     "char:g": .transfer,
+    "char:b": .bookmarks,
   ]
 
   private func operationForKey(_ id: String) -> Operation? {
-    active.keyOperations[id] ?? Self.operations[id]
+    if let operation = active.keyOperations[id] {
+      return operation
+    }
+    // F・F9 は Find。対象（マークがあればマークした全部、なければカーソル）が、変換できる同じ種類のファイルなら Format。
+    if id == "char:f" || id == "f9" {
+      return active.commands[.format]?.available(active) == true ? .format : .find
+    }
+    return Self.operations[id]
   }
 
   /// 非同期の操作を1つずつ実行する。終わったら、git の窓を出していれば読み直す（フォルダーの移動やファイルの操作に合わせる）。

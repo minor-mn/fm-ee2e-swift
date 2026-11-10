@@ -67,7 +67,7 @@
         "               G/F12: ローカルとの転送  E/F8: 接続先で編集",
         "               S: 接続先でコマンドを実行",
         "Container      Enter: 接続・停止中なら起動確認。G/F12: 反対側のローカルとコピー",
-        "               一覧では Space: 複数マーク / C: Create / U: Up / S: Stop / D: Delete / F: 一覧用 compose 選択",
+        "               一覧では Space: 複数マーク / C: Create / U: Up / S: Stop / D: Delete / Ctrl+C: 一覧用 compose 選択",
         "               一覧の F12（反対側のローカルの F12 でも）: 表示の切り替え・ネットワーク（Networks）・Containerfile の作成・更新（Create a new Containerfile / Modify the Containerfile）・イメージの取得と削除・ログ",
         "               O: 一覧に戻る（コンテナは動いたまま）",
         "Enter          フォルダーなら移動",
@@ -96,10 +96,17 @@
         "D / Del        削除 (ゴミ箱へ移動。SSH は rm で削除)",
         "A              権限変更",
         "S              シェル (コマンドを入れて枠の中で実行。終わったら Enter で戻る)",
+        "               入力欄で Shift+Enter なら、ブックマーク (B の一覧) に入れてから実行",
+        "B              コマンドのブックマーク (Enter: シェルの入力欄に入れる / E: 名前・コマンドを直す / D: 消す)",
         "E              エディタ ($EDITORがなければvim固定)",
         "R              名前の変更",
         "K              mkdir (空のフォルダーを作る)",
         "T              touch (空のファイルを作る)",
+        "Ctrl+T / F10   開いているフォルダーの画像・動画だけをタイル表示 (on・off)",
+        "               タイルの左上はマークのチェックボックス (Space で入れる・外す)。←→↑↓ でタイルを移動",
+        "F / F9         検索 (ローカル・SSH・Container。ローカルの変換できるファイルの上では Format)",
+        "               ファイル内容の正規表現は、ローカルは ICU、SSH・Container は接続先の grep -E の書き方",
+        "               結果はタブいっぱいに出す。Enter・E・Space (マーク) だけ使え、Esc で閉じるとマークを引き継ぐ",
         "Z              圧縮 (zip / tar.gz / tar.xz をカレントに作る。",
         "               SSH は接続先の zip・tar・gzip・xz で作れる形式だけ)",
         "U              カーソルの .zip .tar.gz .tar.xz をカレントに展開",
@@ -107,7 +114,7 @@
         "Ctrl+L         ディレクトリへ移動 (↑↓ で、Ctrl+L で移動したディレクトリの履歴)",
         "~              ホームへ移動",
         ".              隠しファイルを表示",
-        "V              画像・動画のプレビューを反対側の窓に出す (on・off。SSH は画像だけ)",
+        "V              画像・動画のプレビューを反対側の窓に出す (on・off。SSH は画像だけ、Google Drive の動画は 10MB 以下だけ)",
         "O              SSH は切断、Container は一覧に戻る",
         "L              再読み込み",
         "H / ?          このヘルプを表示",
@@ -130,8 +137,35 @@
   preview_overlay: {
     unavailable: "プレビューできません",
     loading: "読み込み中…",
+    too_large: "動画が大きすぎるのでプレビューしません（Google Drive は {size} まで）",
   },
-  // GUI 版
+  // 検索（F・F9）
+  find: {
+    title: "検索",
+    path: "検索パス",
+    content: "ファイル内容",
+    names: "ファイル名",
+    extensions: "対象拡張子",
+    ignored: "無視するディレクトリ名",
+    note: "ファイル内容は正規表現（10MB を超えるファイルは見ない）。ファイル名・拡張子・ディレクトリ名は空白区切りで複数",
+    search: "検索",
+    searching: "検索中…",
+    cancelled: "検索をやめました。",
+    not_found: "見つかりませんでした。",
+    not_folder: "フォルダーではありません: {path}",
+    invalid_regex: "ファイル内容の正規表現が正しくありません: {pattern}",
+    // 検索の結果を出しているときの、上の場所の行
+    location: "検索結果 {count}件: {path}",
+    // ファイル内容で探したとき、出した3行のほかにも合う行があるファイルの下に出す
+    more: "…ほかにも合う行があります",
+    close: "閉じる",
+  },
+  // タイル表示（Ctrl+T）
+  tiles: {
+    empty: "画像・動画がありません",
+    too_large: "大きすぎます",
+    video_unavailable: "動画は出せません",
+  },
   gui_app: {
     config_reload_failed: "~/.config/fm-ee2e/config.json5 を読み込めません。今の設定のままです。\n{error}",
     // メニュー
@@ -253,6 +287,8 @@
       execute: "実行",
     },
     progress_title: "お待ちください",
+    aborted: "中止しました。",
+    aborting: "中止しています…",
     error_title: "エラー",
     yes: "はい",
   },
@@ -265,6 +301,7 @@
     compress_message: "{count}項目を {place} に圧縮します。ファイル名",
     compressing: "圧縮中…",
     compressing_count: "圧縮中…（{done}/{total}）{name}",
+    compress_cancelled: "「{name}」の圧縮をやめました。",
     ssh_unavailable: "{host} には zip も tar（gzip・xz）もないので、圧縮できません。",
     reading: "「{name}」を読み込み中…",
     extract_title: "展開",
@@ -277,6 +314,7 @@
     keep_existing: "今あるファイルは残す",
     extracting: "「{name}」を展開中…",
     extracting_count: "「{archive}」を展開中…（{done}/{total}）{name}",
+    extract_cancelled: "「{name}」の展開をやめました（展開した分は残っています）。",
   },
   // 削除
   delete: {
@@ -371,6 +409,23 @@
   // シェル
   shell: {
     title: "シェル",
+    // Shift+Enter の案内
+    bookmark: "Bookmark&OK",
+  },
+  // コマンドのブックマーク（B）
+  bookmarks: {
+    title: "ブックマーク",
+    empty: "ブックマークがありません。S の入力欄で Shift+Enter で実行すると、ブックマークします。",
+    hint_run: "シェルに入れる",
+    hint_edit: "編集",
+    hint_delete: "削除",
+    edit_title: "ブックマークの編集",
+    name: "名前",
+    command: "コマンド",
+    command_required: "コマンドを入れてください。",
+    delete_title: "ブックマークの削除",
+    delete_confirm: "「{name}」をブックマークから消します。",
+    invalid_file: "{file} を読めません。",
   },
   // SSH の切断
   sign_out: {
@@ -695,8 +750,6 @@
     requires_macos: "Apple Container は macOS 26 以降で使えます。",
     not_installed: "container コマンドがありません。Apple Container をインストールしてください。",
     system_stopped: "Container のサービスが停止しています。Enter で起動します。",
-    start_system: "Container サービスの起動",
-    start_system_confirm: "Apple Container のサービスを起動しますか？",
     start: "起動",
     create: "作成",
     delete: "破棄",
@@ -734,6 +787,12 @@
       delete_button: "Delete",
       delete_confirm: "ネットワーク「{name}」を削除しますか？",
       deleted: "ネットワーク {name} を削除しました。",
+    },
+    // F12 の Command。カーソルのコンテナが動いていればその中で、止まっていればその設定で使い捨てのコンテナを作ってコマンドを実行する。
+    command: {
+      menu: "Command",
+      prompt: "{name} の設定で使い捨てのコンテナを作って実行します（終わったら消します）。",
+      prompt_exec: "動いている {name} の中で実行します。",
     },
     // F12 の「新しいイメージを取得」と「イメージを削除」。
     images: {
@@ -851,13 +910,16 @@
     delete_confirm: "「{name}」を破棄しますか？\n起動中の場合は停止してから破棄します。コンテナ内のファイルは削除されます。",
     stop: "停止",
     starting: "Container を起動中…",
+    // F12 の一番下で Apple Container のサービスを止める。ローカルの窓の F12 では、状態に合わせて起動か停止だけを出す。
+    shutdown: "Shutdown",
+    start_service: "Start",
     stopping: "Container を停止中…",
     start_confirm: "「{name}」を起動して接続しますか？",
     compose_start_confirm: "次のコンテナを起動しますか？\nまだ作成されていないものは、設定ファイルから新しく作成します。",
     target_containers: "対象のコンテナ",
     configuration_files: "使用する設定ファイル（上から順に適用）",
     no_shell: "「{name}」のシェルを開けません。sh のないイメージは参照できません。\n{error}",
-    no_compose: "compose ファイルがありません。F で使用するファイルを指定できます。",
+    no_compose: "compose ファイルがありません。Ctrl+C で使用するファイルを指定できます。",
     invalid_compose: "{file} は Compose のオブジェクトとして読み取れません。",
     no_services: "compose に services がありません。",
     invalid_project_name: "Compose のプロジェクト名には英小文字・数字・ハイフン・アンダースコアを使ってください。",

@@ -1,6 +1,5 @@
 import AppKit
 
-/// GUI 版を起動する。終わったら終了する（戻らない）。
 public func runFmEe2eGUI() -> Never {
   importLoginEnvironment()
   // Finder や Dock から起動すると、今いるフォルダーが / になる。左の窓は今いるフォルダーで始まるので、
@@ -268,7 +267,6 @@ private func importLoginEnvironment() {
       }
     }
   }
-  // vim などが日本語を正しく扱えるよう、ターミナル.app と同じく UTF-8 のロケールにする。
   if ProcessInfo.processInfo.environment["LANG"] == nil {
     let language = Locale.current.language
     let code = [language.languageCode?.identifier, language.region?.identifier].compactMap { $0 }.joined(separator: "_")

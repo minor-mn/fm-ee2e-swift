@@ -97,8 +97,7 @@ nonisolated enum ChildProcesses {
     }
   }
 
-  /// 自分で waitpid する子プロセス（[runDisclaimed]）。待ち終えたら [remove] する。
-  static func add(_ pid: Int32) {
+  private static func add(_ pid: Int32) {
     lock.withLock { _ = pids.insert(pid) }
   }
 
@@ -338,55 +337,6 @@ func runProcess(
 
 extension RunningProcess {
   fileprivate var stdinHandle: FileHandle? { stdinPipe?.fileHandleForWriting }
-}
-
-/// [executable] を、このアプリに紐づかないプロセスとして実行し、終わるまで待つ。
-/// macOS は、アプリの子プロセスが launchd に登録したサービスをそのアプリのバックグラウンド項目として扱い、
-/// アプリを終了するときに「バックグラウンドで実行中」と聞いて止めてしまう。それを避けるため、子プロセスの「責任元」を
-/// アプリから外して起動する（responsibility_spawnattrs_setdisclaim。非公開だが iTerm2・VS Code なども使っている）。
-/// その関数がないか、その形で起動できなければ nil を返す（呼んだ側で普通に起動し直す）。
-nonisolated func runDisclaimed(_ executable: String, _ arguments: [String]) async -> ProcResult? {
-  typealias Disclaim = @convention(c) (UnsafeMutablePointer<posix_spawnattr_t?>, Int32) -> Int32
-  // RTLD_DEFAULT（読み込み済みのすべてのライブラリから探す）。
-  guard let symbol = dlsym(UnsafeMutableRawPointer(bitPattern: -2), "responsibility_spawnattrs_setdisclaim") else {
-    return nil
-  }
-  let disclaim = unsafeBitCast(symbol, to: Disclaim.self)
-  var attributes: posix_spawnattr_t?
-  guard posix_spawnattr_init(&attributes) == 0 else { return nil }
-  defer { posix_spawnattr_destroy(&attributes) }
-  // 0・1・2 以外の記述子は子に渡さない。
-  guard posix_spawnattr_setflags(&attributes, Int16(POSIX_SPAWN_CLOEXEC_DEFAULT)) == 0,
-    disclaim(&attributes, 1) == 0 else { return nil }
-  let output = Pipe()
-  let errors = Pipe()
-  var actions: posix_spawn_file_actions_t?
-  guard posix_spawn_file_actions_init(&actions) == 0 else { return nil }
-  defer { posix_spawn_file_actions_destroy(&actions) }
-  posix_spawn_file_actions_addopen(&actions, 0, "/dev/null", O_RDONLY, 0)
-  posix_spawn_file_actions_adddup2(&actions, output.fileHandleForWriting.fileDescriptor, 1)
-  posix_spawn_file_actions_adddup2(&actions, errors.fileHandleForWriting.fileDescriptor, 2)
-  let path = resolveExecutable(executable)
-  let argv: [UnsafeMutablePointer<CChar>?] = ([path] + arguments).map { strdup($0) } + [nil]
-  defer { argv.forEach { free($0) } }
-  var pid: pid_t = 0
-  guard posix_spawn(&pid, path, &actions, &attributes, argv, environ) == 0 else { return nil }
-  ChildProcesses.add(pid)
-  try? output.fileHandleForWriting.close()
-  try? errors.fileHandleForWriting.close()
-  return await Task.detached {
-    // 出力を読みきってから待つ（パイプが詰まって子が止まらないよう、両方を並べて読む）。
-    async let out = output.fileHandleForReading.readDataToEndOfFile()
-    async let err = errors.fileHandleForReading.readDataToEndOfFile()
-    let (stdout, stderr) = await (out, err)
-    var status: Int32 = 0
-    while waitpid(pid, &status, 0) < 0 && errno == EINTR {}
-    ChildProcesses.remove(pid)
-    // 下位7ビットが0なら終了コード、そうでなければシグナル番号（負の値で表す）。
-    let signal = status & 0x7f
-    let code = signal == 0 ? Int((status >> 8) & 0xff) : -Int(signal)
-    return ProcResult(exitCode: code, stdoutData: stdout, stderrData: stderr)
-  }.value
 }
 
 /// [executable] を実行し、失敗したら標準エラー出力を [CommandFailed] で投げる。

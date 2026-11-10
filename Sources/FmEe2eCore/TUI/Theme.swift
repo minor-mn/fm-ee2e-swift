@@ -42,7 +42,6 @@ nonisolated struct ThemeColors: Sendable {
   /// 選んでいる窓のカーソルの行の地。nil ならタブごとの元の色。
   var selection: Rgb?
 
-  /// 透明度つき（#RRGGBBAA）で書いた色の透明度（色の値ごと）。GUI 版で地を塗るときに使う。
   var alphas: [Int: Double] = [:]
 
   /// 上の帯（タイトルの枠）の中の背景の色。nil なら塗らない（窓全体の背景が見える）。
@@ -64,6 +63,9 @@ nonisolated struct ThemeColors: Sendable {
   /// 差分の、追加した行・消した行の印（+・-）と数の色。
   var diffAdded = Rgb(0x2EE0A8)
   var diffRemoved = Rgb(0xFF4D5E)
+
+  /// 検索（F）で、ファイル内容の正規表現に合った文字列の色。
+  var findMatch = Rgb(0xA6FF4D)
 
   /// git status の、変更の種類（[GitStatusLine.statusKey]）ごとの色。ないものは補足の文字の色。
   var gitStatus: [String: Rgb] = [:]

@@ -172,8 +172,6 @@ final class TerminalModal: Modal, SelectionSource {
     }
   }
 
-  /// 中身は、選んでいる窓のタブの見た目（GUI 版では文字の大きさも）で、枠とは別の画面に描く。
-  /// GUI 版では、この画面の中だけをマウスで選んでコピーできる（枠は入らない）。
   override func drawBody(_ screen: Screen, _ x: Int, _ y: Int, _ width: Int) {
     screen.layer(x, y, width, bodyRows, theme: app.activeTheme, selection: self) { s in
       drawTerminal(s, s.width, s.height)
@@ -221,7 +219,6 @@ final class TerminalModal: Modal, SelectionSource {
     }
   }
 
-  // ---- 範囲選択（GUI 版） ----
 
   var lineCount: Int { terminal.scrollback.count + terminal.rows }
 

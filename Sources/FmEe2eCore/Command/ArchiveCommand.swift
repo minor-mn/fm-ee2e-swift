@@ -58,6 +58,9 @@ class CompressCommand: Command {
           }
         }
         pane.marks.clear()
+      } catch is CancellationError {
+        // 作りかけの圧縮ファイルは compressPaths が消す。
+        app.showStatus(tr("archive_command.compress_cancelled", ["name": name]))
       } catch {
         await app.showError(error)
       }
@@ -168,6 +171,8 @@ class ExtractCommand: Command {
           update(tr("archive_command.extracting_count", ["archive": entry.name, "done": done, "total": total, "name": item]))
         }
       }
+    } catch is CancellationError {
+      app.showStatus(tr("archive_command.extract_cancelled", ["name": entry.name]))
     } catch {
       await app.showError(error)
     }

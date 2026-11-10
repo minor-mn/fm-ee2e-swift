@@ -110,19 +110,19 @@ func drawKeyHints(_ screen: Screen, _ y: Int, _ keys: [(String, String)], note: 
   }
 }
 
-/// F1〜F12 の機能と、同じ動きの文字キー（nil は割り当てなし）。F11 は macOS がデスクトップの表示に使うので空ける。
-/// F12 は右の窓によって変わるので、[drawFunctionKeys] に渡す。
+/// F1〜F12 の機能と、同じ動きのキーの名前（文字は「char:小文字」、Ctrl は「ctrl:文字」。nil は割り当てなし）。
+/// F11 は macOS がデスクトップの表示に使うので空ける。F12 は右の窓によって変わるので、[drawFunctionKeys] に渡す。
 let functionKeys: [(String, String)?] = [
-  ("Attr", "A"),
-  ("Copy", "C"),
-  ("Move", "M"),
-  ("Delete", "D"),
-  ("Touch", "T"),
-  ("Mkdir", "K"),
-  ("Rename", "R"),
-  ("Edit", "E"),
-  ("Format", "F"),
-  nil,
+  ("Attr", "char:a"),
+  ("Copy", "char:c"),
+  ("Move", "char:m"),
+  ("Delete", "char:d"),
+  ("Touch", "char:t"),
+  ("Mkdir", "char:k"),
+  ("Rename", "char:r"),
+  ("Edit", "char:e"),
+  ("Find", "char:f"),
+  ("TileView", "ctrl:t"),
   nil,
 ]
 

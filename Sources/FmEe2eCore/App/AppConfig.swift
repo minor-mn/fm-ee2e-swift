@@ -44,7 +44,6 @@ struct AppConfig {
   /// 見た目（appearance）。書き方は [parseAppearance]。
   let appearance: Appearance
 
-  /// ¥キーで \ を、Option+¥ で ¥ を入力する（GUI 版だけ）。書かなければ true。
   let yenToBackslash: Bool
 
   static var file: String { p.join(homeDir, ".config", "fm-ee2e", "config.json5") }
@@ -231,7 +230,6 @@ struct AppConfig {
   }
 
   /// 要素ごとの色の書き場所（ブロックの中のパス）と、それを入れる [ThemeColors] の色。
-  /// 地の色（パスに background を含む）は、#RRGGBBAA で透明度も書ける（GUI 版だけ効く）。
   private static let colorElements: [(path: [String], apply: (inout ThemeColors, Rgb) -> Void)] = [
     (["text", "color"], { $0.text = $1 }),
     (["subtext", "color"], { $0.muted = $1 }),
@@ -254,6 +252,7 @@ struct AppConfig {
     (["diff", "added", "background", "color"], { $0.addedLine = $1 }),
     (["diff", "removed", "color"], { $0.diffRemoved = $1 }),
     (["diff", "removed", "background", "color"], { $0.removedLine = $1 }),
+    (["find", "match", "color"], { $0.findMatch = $1 }),
   ]
     + gitStatusKeys.map { key in (["status", key, "color"], { $0.gitStatus[key] = $1 }) }
     + gitSectionKeys.map { key in (["sections", key, "color"], { $0.gitSectionColor[key] = $1 }) }

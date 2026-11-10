@@ -17,7 +17,6 @@ nonisolated struct Rgb: Hashable, Sendable {
     return Rgb((channel(r, other.r) << 16) | (channel(g, other.g) << 8) | channel(b, other.b))
   }
 
-  /// 同じ色を、不透明度 [opacity]（0〜1）で塗るもの（GUI 版だけ効く）。透け具合は上の8ビットに持つ。
   func withOpacity(_ opacity: Double) -> Rgb {
     value < 0 ? self : Rgb((value & 0xFFFFFF) | Int(((1 - opacity) * 255).rounded()) << 24)
   }
@@ -85,6 +84,9 @@ nonisolated enum Palette {
   /// 差分の、追加した行・消した行の印と数の色。
   static var diffAdded: Rgb { colors.diffAdded }
   static var diffRemoved: Rgb { colors.diffRemoved }
+
+  /// 検索で、ファイル内容に合った文字列の色。
+  static var findMatch: Rgb { colors.findMatch }
 }
 
 nonisolated struct Style: Hashable, Sendable {
@@ -128,13 +130,11 @@ private nonisolated struct Cell: Equatable {
   }
 }
 
-/// 画面のセルの大きさを決めるもの（GUI 版）。見た目ごとに文字の大きさが違うので、
 /// [from] の見た目で幅 [width]・高さ [height] の範囲に、[to] の見た目のセルが何桁・何行入るかを返す。
 protocol GridSizer: AnyObject {
   func gridSize(_ width: Int, _ height: Int, from: ThemeKey, to: ThemeKey) -> (Int, Int)
 }
 
-/// マウスで範囲を選んでコピーできる中身（GUI 版）。画面から流れた行も含めて、上から数えた行で扱う。
 protocol SelectionSource: AnyObject {
   /// 行の数。
   var lineCount: Int { get }
@@ -162,10 +162,8 @@ final class ScreenLayer {
     self.fill = fill
   }
 
-  /// 枠の中に塗る色（見た目の背景の代わり。GUI 版）。透明度は [ThemeColors.alphas] による。
   let fill: Rgb?
 
-  /// 画面の縁に枠（[Screen.box]）を描く。GUI 版では、背景を枠の線の内側だけに塗る。
   let framed: Bool
 
   /// 親の画面のセルで数えた位置と大きさ。
@@ -175,18 +173,18 @@ final class ScreenLayer {
   let h: Int
   let screen: Screen
 
-  /// マウスで範囲を選んでコピーできる中身（GUI 版）。選べなければ nil。
   private(set) weak var selection: SelectionSource?
 }
 
 /// 文字のセルの上に重ねる画像（プレビュー）。
 struct ScreenImage {
-  init(_ x: Int, _ y: Int, _ w: Int, _ h: Int, _ image: NSImage) {
+  init(_ x: Int, _ y: Int, _ w: Int, _ h: Int, _ image: NSImage, badge: String? = nil) {
     self.x = x
     self.y = y
     self.w = w
     self.h = h
     self.image = image
+    self.badge = badge
   }
 
   let x: Int
@@ -194,6 +192,9 @@ struct ScreenImage {
   let w: Int
   let h: Int
   let image: NSImage
+
+  /// 画像の右下に重ねる印（タイル表示の 🪟・🎬）。
+  let badge: String?
 }
 
 /// 1画面分の描画バッファ。窓（[GridView]）がこれを描く。
@@ -222,16 +223,14 @@ final class Screen {
   var cursor: (x: Int, y: Int)?
 
   /// セルの上に重ねる画像。下のセルは空白にしておく。
-  var image: ScreenImage?
+  var images: [ScreenImage] = []
 
   /// 上に重ねた画面（描いた順。後のものほど上）。
   private(set) var layers: [ScreenLayer] = []
 
-  /// セル（x, y）を掴んだときに、ほかのアプリへファイルとして渡すパス（GUI 版の CapsLock 中のドラッグ）。
   /// ファイルの行でなければ nil。
   var filesAt: ((Int, Int) -> [String]?)?
 
-  /// ほかのアプリからこの画面にドロップされたファイルを受け取るもの（GUI 版）。受け取らなければ nil。
   var fileDrop: (([String]) async -> Void)?
 
   /// ファイルの受け渡しをやめる（一覧の上にプレビューを重ねたときなど）。
@@ -249,9 +248,7 @@ final class Screen {
   }
 
   /// [x]・[y] から幅 [w]・高さ [h] の範囲に、見た目 [theme] の画面を重ねて [draw] で描く。
-  /// GUI 版では文字の大きさが見た目ごとに違うので、重ねる画面の桁数・行数は [sizer] が決める。
   /// [clear] なら透明なセルで始め、書いたセルだけが下の画面を隠す。
-  /// [selection] があれば、GUI 版でマウスで範囲を選んでコピーできる。
   func layer(
     _ x: Int, _ y: Int, _ w: Int, _ h: Int,
     theme: ThemeKey,
@@ -282,7 +279,7 @@ final class Screen {
 
   /// この画面と重ねた画面の画像を消す。
   func removeImages() {
-    image = nil
+    images = []
     for layer in layers {
       layer.screen.removeImages()
     }

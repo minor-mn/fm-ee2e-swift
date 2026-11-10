@@ -78,6 +78,10 @@ final class ContainerPane: SshPane {
   private var filesDirectory: String?
   private var notice: [String]?
   private var serviceStopped = false
+  /// サービスが動いているかを確かめられたか（macOS が古い・container がないときは確かめない）。
+  private var serviceChecked = false
+  /// F12 の Command で打ったコマンド（コンテナ名ごと、古い順）。どこにも書き込まない。
+  private var runHistory: [String: [String]] = [:]
   /// 一覧をネットワークごとに並べる（by Network）。これが最初の並び。F12 の先頭の by Status で状態ごとの並びに替え、by Network で戻す。
   private(set) var byNetwork = true
   private var widestDetail = 0
@@ -120,14 +124,14 @@ final class ContainerPane: SshPane {
   }
   override var canMark: Bool { ssh == nil || super.canMark }
   override func markable(_ entry: Entry) -> Bool { entry.data is ContainerTarget || (!(entry.data is ContainerSection) && super.markable(entry)) }
-  override func selectable(_ entry: Entry) -> Bool { !(entry.data is ContainerSection) }
+  override func selectable(_ entry: Entry) -> Bool { !(entry.data is ContainerSection) && super.selectable(entry) }
   override var folderKey: String { ssh == nil ? "container-list" : super.folderKey }
   override func keyOf(_ entry: Entry) -> String {
     if let target = entry.data as? ContainerTarget { return "container:\(target.name)" }
     return super.keyOf(entry)
   }
   override var keyOperations: [String: Operation] {
-    ssh == nil ? ["char:c": .create, "f1": .create, "f2": .extract, "f3": .shell, "f4": .delete, "f5": .chmod, "f12": .logs] : [:]
+    ssh == nil ? ["char:c": .create, "f1": .create, "f2": .extract, "f3": .shell, "f4": .delete, "f5": .chmod, "f12": .logs, "ctrl:c": .compose] : [:]
   }
 
   var targetStatuses: Set<String> {
@@ -163,7 +167,7 @@ final class ContainerPane: SshPane {
     }
   }
 
-  /// L（読み直し）。コンテナの一覧を出しているときは、今のフォルダーの docker-compose（F で選んだファイルがあればそれ）から
+  /// L（読み直し）。コンテナの一覧を出しているときは、今のフォルダーの docker-compose（Ctrl+C で選んだファイルがあればそれ）から
   /// 保存済みの設定（.fm-ee2e/project.json5・containers/*.json5）を作り直してから読み直す。
   override func reload() async {
     if ssh == nil && ready && !serviceStopped { rebuildFromCompose() }
@@ -201,6 +205,17 @@ final class ContainerPane: SshPane {
         await load()
       }),
       (tr("container.networks.menu"), { [self] in await manageNetworks() }),
+    ]
+    // 動いているコンテナではその中で（設定は要らない）、止まっているコンテナでは保存済みの設定があればコマンドを実行できる。
+    // 今のフォルダーのプロジェクトにないコンテナ（共通のものなど）も、名前で設定を引く。
+    if let target {
+      let definition = (nativeProject?.definitions.first(where: { $0.name == target.name }) ?? NativeContainerProject.savedDefinition(target.name))
+        .flatMap { $0.problem == nil ? $0 : nil }
+      if target.running || definition != nil {
+        choices.append((tr("container.command.menu"), { [self] in await runCommand(target, definition) }))
+      }
+    }
+    choices += [
       // 今のフォルダーに Containerfile があれば直す、なければ作る項目として出す。
       (tr(FileManager.default.fileExists(atPath: p.join(localDirectory(), "Containerfile")) ? "container.containerfile.menu_modify" : "container.containerfile.menu_create"),
         { [self] in await createContainerfile() }),
@@ -214,6 +229,8 @@ final class ContainerPane: SshPane {
       choices.append((tr("container.logs.boot"), logs(["logs", "--boot", target.name])))
     }
     choices.append((tr("container.logs.system"), logs(["system", "logs"])))
+    // 一番下に、1行空けてサービスの停止。
+    choices += [("", {}), (tr("container.shutdown"), { [self] in await shutdown() })]
     let title = target.map { tr("container.menu.title_for", ["name": $0.name]) } ?? tr("container.menu.title")
     guard let index = await app.askChoice(title, choices.map(\.0)) else { return }
     await choices[index].1()
@@ -263,6 +280,37 @@ final class ContainerPane: SshPane {
         return
       }
     }
+  }
+
+  /// F12 の Command。入力したコマンドを実行する（↑↓ でこのコンテナで打ったコマンド）。出力は残して Enter を待つ。
+  /// 動いているコンテナでは、その中で実行する（container exec）。名前付きボリュームは動いている本体と同時に付けられないため。
+  /// 動いていなければ、[definition] の設定で使い捨てのコンテナを作って実行し、消す。
+  /// まだ作っていないコンテナでは、作成と同じくイメージ・ネットワーク・ボリュームを先に用意する。
+  private func runCommand(_ target: ContainerTarget, _ definition: NativeContainerDefinition?) async {
+    let project = nativeProject ?? NativeContainerProject(root: NativeContainerProject.findRoot(localDirectory()) ?? localDirectory(), definitions: [])
+    guard let entered = await app.input(tr("container.command.menu"),
+        message: tr(target.running ? "container.command.prompt_exec" : "container.command.prompt", ["name": target.name]),
+        history: runHistory[target.name] ?? []),
+      !entered.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+    var list = (runHistory[target.name] ?? []).filter { $0 != entered }
+    list.append(entered)
+    runHistory[target.name] = list
+    do {
+      let steps: [[String]]
+      if target.running {
+        steps = [["exec", "--interactive", "--tty", target.name, "/bin/sh", "-c", entered]]
+      } else if let definition {
+        guard let run = definition.runArgs(entered) else {
+          throw AppError(tr("container.invalid_saved_config", ["file": definition.service]))
+        }
+        steps = (target.status == "missing" ? Array(try await project.createSteps(definition, client: client).dropLast()) : []) + [run]
+      } else {
+        return
+      }
+      await runInTerminal(app, "\(target.name) $ \(entered)", "/bin/sh", ["-c", Self.stepScript(client.executable, steps)],
+        workingDirectory: project.root)
+    } catch { await app.showError(error) }
+    await load()
   }
 
   /// ネットワークの一覧。先頭の Create a new network で作り、既存のネットワークを選ぶと中身と使っているコンテナを見せる
@@ -431,6 +479,9 @@ final class ContainerPane: SshPane {
   }
 
   override var commands: [Operation: Command] {
+    if ssh != nil && found != nil {
+      return super.commands
+    }
     if ssh != nil {
       var result = super.commands
       result[.transfer] = ContainerTransfer(upload: false)
@@ -438,17 +489,20 @@ final class ContainerPane: SshPane {
     }
     return [.enter: ContainerEnter(), .reload: ReloadCommand(), .extract: ContainerAction("start"),
       .shell: ContainerAction("stop"), .create: ContainerAction("create"),
-      .delete: ContainerAction("delete"), .format: ComposeFiles(), .chmod: ContainerSettingsCommand(), .logs: ContainerLogs()]
+      .delete: ContainerAction("delete"), .compose: ComposeFiles(), .chmod: ContainerSettingsCommand(), .logs: ContainerLogs()]
   }
   override var transferCommand: Command? { ContainerTransfer(upload: true) }
 
   override func allowsKey(_ id: String) -> Bool {
+    if found != nil {
+      return super.allowsKey(id)
+    }
     if ssh == nil, id.hasPrefix("f"), let number = Int(id.dropFirst()) {
       guard (1...12).contains(number) else { return false }
       guard let keys = functionKeyLayout else { return false }
       return keys[number - 1] != nil
     }
-    return super.allowsKey(id) || ["enter", "char:l", "char:u", "char:s", "char:c", "char:d", "char:f", "char:a", "char: ", "char:　", "char:*", "delete", "f2", "f4", "f9"].contains(id)
+    return super.allowsKey(id) || ["enter", "char:l", "char:u", "char:s", "char:c", "char:d", "ctrl:c", "char:a", "char: ", "char:　", "char:*", "delete", "f2", "f4"].contains(id)
   }
 
   func refreshContext() async {
@@ -458,10 +512,12 @@ final class ContainerPane: SshPane {
 
   override func fetch() async throws -> [Entry] {
     notice = nil
+    serviceChecked = false
     if ssh != nil { return try await super.fetch() }
     guard #available(macOS 26, *) else { notice = [tr("container.requires_macos")]; return [] }
     guard FileManager.default.isExecutableFile(atPath: client.executable) else { notice = [tr("container.not_installed")]; return [] }
     serviceStopped = !(try await client.systemRunning())
+    serviceChecked = true
     if serviceStopped {
       notice = [tr("container.system_stopped")]
       return []
@@ -595,14 +651,33 @@ final class ContainerPane: SshPane {
     } catch { await app.showError(error); await load() }
   }
 
-  /// Enter は、サービス停止中の案内からも起動確認を開ける。
+  /// F12 の Shutdown。Apple Container のサービスを止める（動いているコンテナも止まる）。止めたあとは停止中の案内を出す。
+  private func shutdown() async {
+    do { try await app.withProgress(tr("container.stopping")) { try await client.stopSystem() } }
+    catch { await app.showError(error) }
+    await load()
+  }
+
+  /// Enter は、サービス停止中の案内からは、確認せずにサービスを起動する。
   func enter() async {
     if serviceStopped {
-      guard await app.confirm(tr("container.start_system"), tr("container.start_system_confirm")) else { return }
-      do { try await app.withProgress(tr("container.starting")) { try await client.startSystem() } }
-      catch { await app.showError(error) }
-      await load()
+      await startService()
     } else if let current { await open(current) }
+  }
+
+  /// Apple Container のサービスを起動して、一覧を読み直す（確認はしない）。
+  private func startService() async {
+    do { try await app.withProgress(tr("container.starting")) { try await client.startSystem() } }
+    catch { await app.showError(error) }
+    await load()
+  }
+
+  /// 反対側のローカルの窓の G・F12 で開くメニュー。サービスが止まっていれば起動、動いていれば Shutdown だけを出す。
+  func showServiceMenu() async {
+    guard ssh == nil, serviceChecked, !loading else { return }
+    let item = tr(serviceStopped ? "container.start_service" : "container.shutdown")
+    guard await app.askChoice(tr("container.menu.title"), [item]) != nil else { return }
+    if serviceStopped { await startService() } else { await shutdown() }
   }
 
   /// 一覧にある名前だけを使い、操作は Apple Container に直接依頼する。
@@ -657,8 +732,10 @@ final class ContainerPane: SshPane {
           if !imageJobs.isEmpty { sections.append(tr("container.bulk_delete_images_confirm") + "\n\n" + imageJobs.map(\.image).joined(separator: "\n")) }
           guard await app.confirm(tr("container.\(action)"), sections.joined(separator: "\n\n"), yes: tr("container.\(action)")) else { return }
         }
-        await app.withProgress(tr("container.progress_action")) {
+        // Esc で中止したら、残りは実行しない（止めたコマンドの失敗も知らせない）。
+        try await app.withProgress(tr("container.progress_action")) {
           for (mark, target) in jobs {
+            if Task.isCancelled { break }
             do {
               if action == "start" {
                 let ports = existing.first { $0.name == target.name }?.details.ports ?? []
@@ -667,16 +744,19 @@ final class ContainerPane: SshPane {
               }
               try await client.checked([action, target.name])
               marks.removeValue(forKey: keyOf(mark.entry))
-            } catch { errors.append("\(target.name): \(errorMessage(error))") }
+            } catch { if !Task.isCancelled { errors.append("\(target.name): \(errorMessage(error))") } }
           }
           for (imageMarks, image) in imageJobs {
+            if Task.isCancelled { break }
             do {
               try await client.checked(["image", "rm", image])
               for mark in imageMarks { marks.removeValue(forKey: keyOf(mark.entry)) }
-            } catch { errors.append("\(image): \(errorMessage(error))") }
+            } catch { if !Task.isCancelled { errors.append("\(image): \(errorMessage(error))") } }
           }
         }
       }
+    } catch is CancellationError {
+      app.showStatus(tr("dialogs.aborted"))
     } catch { errors.append(errorMessage(error)) }
     await load()
     if !errors.isEmpty { await app.showError(errors.joined(separator: "\n")) }
@@ -1017,7 +1097,7 @@ final class ContainerPane: SshPane {
       let definition = try saved.withDefaults()
       let message = tr("container.native_create_confirm", ["name": name, "image": definition.image])
         + "\n\n" + tr("container.saved_configuration") + "\n"
-        + p.join(configuration.root, ".fm-ee2e", "containers", "\(definition.service).json5")
+        + configuration.file(definition)
         + (definition.notes.isEmpty ? "" : "\n\n" + definition.notes.joined(separator: "\n"))
       guard await app.confirm(tr("container.create"), message, yes: tr("container.create")) else { return .cancelled }
       let conflicts = try await portConflicts(definition.create, container: name)
@@ -1060,7 +1140,7 @@ final class ContainerPane: SshPane {
     }.sorted()
   }
 
-  /// 重ねる Compose ファイルを、一覧から重ねる順に1つずつ選ぶ（F）。何も選ばずに決めると自動の選び方に戻る。
+  /// 重ねる Compose ファイルを、一覧から重ねる順に1つずつ選ぶ（Ctrl+C）。何も選ばずに決めると自動の選び方に戻る。
   func chooseComposeFiles() async {
     let directory = NativeContainerProject.findRoot(localDirectory()) ?? localDirectory()
     let found = Self.composeCandidates(directory)

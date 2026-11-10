@@ -95,19 +95,11 @@ class ContainerClient {
     return (host, host.components(separatedBy: ".")[3])
   }
 
-  /// Apple Container のサービスを起動する。サービスがこのアプリのバックグラウンド項目にならないよう、
-  /// アプリに紐づかないプロセスとして container system start を実行する。その形で起動できなければ、普通に実行する。
-  func startSystem() async throws {
-    let args = ["system", "start"]
-    guard let result = await runDisclaimed(executable, args) else {
-      try await checked(args)
-      return
-    }
-    if result.exitCode != 0 {
-      let message = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
-      throw AppError(message.isEmpty ? exitStatusText(result.exitCode) : message)
-    }
-  }
+  /// Apple Container のサービスを起動する（container system start をアプリから直接実行する）。
+  func startSystem() async throws { _ = try await checked(["system", "start"]) }
+
+  /// Apple Container のサービスを止める（動いているコンテナも止まる）。
+  func stopSystem() async throws { _ = try await checked(["system", "stop"]) }
 
   /// --dns-domain を付けずに作ったコンテナが使う DNS ドメイン（container system property list の [dns] の domain）。
   func defaultDNSDomain() async -> String? {
@@ -349,8 +341,8 @@ final class ContainerConnection: Ssh {
 
   /// 接続先の git も、container exec の sh で動かす。標準入力はいつも渡す（git apply などに入力を渡すため）。
   /// [tty] なら端末も割り当てる（認証を聞かれても答えられるように）。
-  override func gitArgs(_ args: [String], tty: Bool = false) throws -> [String] {
-    execArgs("exec git \(args.map(shQuote).joined(separator: " "))", interactive: true, tty: tty)
+  override func gitArgs(_ args: [String], dir: String? = nil, tty: Bool = false) throws -> [String] {
+    execArgs(gitScript(args, dir: dir), interactive: true, tty: tty)
   }
 
   override func alive() async throws -> Bool { try await client.list().contains { $0.name == host && $0.running } }

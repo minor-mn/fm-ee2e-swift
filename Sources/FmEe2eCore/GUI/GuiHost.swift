@@ -37,7 +37,6 @@ final class FontSet {
   let ascent: CGFloat
 }
 
-/// GUI 版の窓。キー入力を端末と同じバイト列にして [KeyDecoder] に渡し、描いた画面を [GridView] に出す。
 final class GuiHost: Host, GridSizer {
   init() {}
 

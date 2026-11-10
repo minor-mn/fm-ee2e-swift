@@ -1,5 +1,4 @@
 #!/bin/sh
-# GUI 版を .app にまとめる。できた fm-ee2e.app は、/Applications などに置いて使う。
 set -eu
 cd "$(dirname "$0")/.."
 swift build -c release --product fm-ee2e

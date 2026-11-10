@@ -22,7 +22,7 @@ struct ComposeProject {
     if let selected = environment["COMPOSE_FILE"], !selected.isEmpty {
       return selected.components(separatedBy: ":").map { absolute($0, directory) }
     }
-    // Compose の標準のファイル名だけを探す。ほかの名前は F で選ぶか COMPOSE_FILE で指定する。
+    // Compose の標準のファイル名だけを探す。ほかの名前は Ctrl+C で選ぶか COMPOSE_FILE で指定する。
     let bases = ["compose.yaml", "compose.yml", "docker-compose.yml", "docker-compose.yaml"]
     guard let base = bases.first(where: { FileManager.default.fileExists(atPath: p.join(directory, $0)) }) else { return [] }
     let overrides = base.hasPrefix("compose.") ? ["compose.override.yaml", "compose.override.yml"] : ["docker-compose.override.yml", "docker-compose.override.yaml"]

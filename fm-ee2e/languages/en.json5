@@ -67,7 +67,7 @@
         "               G/F12: Transfer to/from local  E/F8: Edit on the host",
         "               S: Run a command on the host",
         "Container      Enter: connect, confirming startup if stopped. G/F12: copy to/from the other local pane",
-        "               In the list, Space: mark / C: Create / U: Up / S: Stop / D: Delete / F: choose Compose files for the list",
+        "               In the list, Space: mark / C: Create / U: Up / S: Stop / D: Delete / Ctrl+C: choose Compose files for the list",
         "               F12 in the list (or F12 in the local pane beside it): switch the view, networks, create or update the Containerfile (Create a new Containerfile / Modify the Containerfile), get a new image, delete an image, logs",
         "               O: return to the list (keep running)",
         "Enter          Folder: open it",
@@ -96,10 +96,17 @@
         "D / Del        Delete (move to the Trash; SSH deletes with rm)",
         "A              Change permissions",
         "S              Shell (enter a command and run it in a frame; Enter returns when done)",
+        "               Shift+Enter in the input adds the command to the bookmarks (the B list), then runs it",
+        "B              Command bookmarks (Enter: put it in the shell input / E: edit name and command / D: delete)",
         "E              Editor (vim if $EDITOR is not set)",
         "R              Rename",
         "K              mkdir (create an empty folder)",
         "T              touch (create an empty file)",
+        "Ctrl+T / F10   Show only the images and videos in the current folder as tiles (on/off)",
+        "               The checkbox at each tile’s top left is its mark (Space toggles it). ←→↑↓ move between tiles",
+        "F / F9         Find (local, SSH, Container; Format on a local file that can be converted)",
+        "               The file content regex is ICU locally, and the host’s grep -E on SSH and Container",
+        "               Results fill the tab. Only Enter, E and Space (mark) work; Esc closes them and keeps the marks",
         "Z              Compress (create zip / tar.gz / tar.xz in the current folder;",
         "               SSH: only formats the host’s zip, tar, gzip, xz can create)",
         "U              Extract the .zip .tar.gz .tar.xz at the cursor into the current folder",
@@ -107,7 +114,7 @@
         "Ctrl+L         Go to a directory (↑↓ for the directories you went to with Ctrl+L)",
         "~              Go home",
         ".              Show hidden files",
-        "V              Preview images and videos in the other pane (on/off; SSH: images only)",
+        "V              Preview images and videos in the other pane (on/off; SSH: images only; Google Drive: videos up to 10MB)",
         "O              Disconnect SSH / return to the Container list",
         "L              Reload",
         "H / ?          Show this help",
@@ -130,8 +137,35 @@
   preview_overlay: {
     unavailable: "Can’t preview",
     loading: "Loading…",
+    too_large: "Video too large to preview (Google Drive: up to {size})",
   },
-  // GUI version
+  // Find (F / F9)
+  find: {
+    title: "Find",
+    path: "Search path",
+    content: "File content",
+    names: "File name",
+    extensions: "Extensions",
+    ignored: "Ignored directories",
+    note: "File content is a regular expression (files over 10MB are skipped). Names, extensions and directories: several, separated by spaces",
+    search: "Search",
+    searching: "Searching…",
+    cancelled: "Search cancelled.",
+    not_found: "Nothing found.",
+    not_folder: "Not a folder: {path}",
+    invalid_regex: "The file content is not a valid regular expression: {pattern}",
+    // The location line while showing the results
+    location: "{count} found: {path}",
+    // Under a file whose content has more matching lines than the three shown
+    more: "…more matching lines",
+    close: "Close",
+  },
+  // Tile view (Ctrl+T)
+  tiles: {
+    empty: "No images or videos",
+    too_large: "Too large",
+    video_unavailable: "Can’t show videos",
+  },
   gui_app: {
     config_reload_failed: "Can’t read ~/.config/fm-ee2e/config.json5. Keeping the current settings.\n{error}",
     // Menu
@@ -253,6 +287,8 @@
       execute: "Execute",
     },
     progress_title: "Please wait",
+    aborted: "Aborted.",
+    aborting: "Aborting…",
     error_title: "Error",
     yes: "Yes",
   },
@@ -265,6 +301,7 @@
     compress_message: "Compress {count} items into {place}. File name",
     compressing: "Compressing…",
     compressing_count: "Compressing… ({done}/{total}) {name}",
+    compress_cancelled: "Stopped compressing “{name}”.",
     ssh_unavailable: "{host} has neither zip nor tar (gzip, xz), so it can’t compress.",
     reading: "Reading “{name}”…",
     extract_title: "Extract",
@@ -277,6 +314,7 @@
     keep_existing: "Keep existing files",
     extracting: "Extracting “{name}”…",
     extracting_count: "Extracting “{archive}”… ({done}/{total}) {name}",
+    extract_cancelled: "Stopped extracting “{name}” (files already extracted are kept).",
   },
   // Delete
   delete: {
@@ -371,6 +409,23 @@
   // Shell
   shell: {
     title: "Shell",
+    // The Shift+Enter hint
+    bookmark: "Bookmark&OK",
+  },
+  // Command bookmarks (B)
+  bookmarks: {
+    title: "Bookmarks",
+    empty: "No bookmarks. Run a command with Shift+Enter in the S input to bookmark it.",
+    hint_run: "To shell",
+    hint_edit: "Edit",
+    hint_delete: "Delete",
+    edit_title: "Edit bookmark",
+    name: "Name",
+    command: "Command",
+    command_required: "Enter a command.",
+    delete_title: "Delete bookmark",
+    delete_confirm: "Remove “{name}” from the bookmarks.",
+    invalid_file: "Can’t read {file}.",
   },
   // SSH disconnect
   sign_out: {
@@ -695,8 +750,6 @@
     requires_macos: "Apple Container requires macOS 26 or later.",
     not_installed: "The container command was not found. Install Apple Container.",
     system_stopped: "The Container service is stopped. Press Enter to start it.",
-    start_system: "Start Container service",
-    start_system_confirm: "Start the Apple Container service?",
     start: "Start",
     create: "Create",
     delete: "Delete",
@@ -734,6 +787,12 @@
       delete_button: "Delete",
       delete_confirm: "Delete the network \"{name}\"?",
       deleted: "Deleted the network {name}.",
+    },
+    // Command in the F12 menu. Runs a command inside the container at the cursor if it is running, otherwise in a throwaway container made with its settings.
+    command: {
+      menu: "Command",
+      prompt: "Runs in a throwaway container made with the settings of {name} (removed when it finishes).",
+      prompt_exec: "Runs inside the running {name}.",
     },
     // "Get a new image" and "Delete an image" in the F12 menu.
     images: {
@@ -851,13 +910,16 @@
     delete_confirm: "Delete “{name}”?\nIf running, it will be stopped first. Files inside the container will be deleted.",
     stop: "Stop",
     starting: "Starting Container…",
+    // Stops the Apple Container service from the bottom of the F12 menu. F12 in the Local pane shows only Start or Shutdown, depending on the state.
+    shutdown: "Shutdown",
+    start_service: "Start",
     stopping: "Stopping Container…",
     start_confirm: "Start and connect to “{name}”?",
     compose_start_confirm: "Start the following containers?\nContainers that do not exist will be created from the configuration files.",
     target_containers: "Containers to start",
     configuration_files: "Configuration files (applied in this order)",
     no_shell: "Cannot open a shell in “{name}”. Images without sh cannot be browsed.\n{error}",
-    no_compose: "No compose file found. Press F to choose files.",
+    no_compose: "No compose file found. Press Ctrl+C to choose files.",
     invalid_compose: "Cannot read {file} as a Compose object.",
     no_services: "No services found in compose.",
     invalid_project_name: "Use lowercase letters, numbers, hyphens and underscores for the Compose project name.",

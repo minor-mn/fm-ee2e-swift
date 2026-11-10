@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 
 /// SSH の接続先のファイル。右のタブにも左のタブにも出し、左右で別々に接続する。つなぐ前は ~/.ssh/config の Host を並べる。
 class SshPane: PathPane {
@@ -17,12 +17,31 @@ class SshPane: PathPane {
   /// つないで、ファイルの一覧を出している。
   private var browsing: Bool { ssh != nil }
 
+  override var canTile: Bool { browsing && found == nil }
+
+  override func tileable(_ entry: Entry) -> Bool { super.tileable(entry) && entry.data is RemoteEntry }
+
+  /// 動画は、ファイルをまるごと読まないと1コマも出せないので作らない（プレビューと同じ）。
+  override func thumbnailNote(_ entry: Entry, _ kind: PreviewKind) -> String? {
+    kind == .video ? tr("tiles.video_unavailable") : nil
+  }
+
+  override func thumbnail(_ entry: Entry, _ kind: PreviewKind) async -> NSImage? {
+    guard kind == .image, let ssh else {
+      return nil
+    }
+    return (try? await ssh.run("cat \(shQuote(pathOf(entry)))")).flatMap(makeThumbnail)
+  }
+
   /// S で打ったコマンド（接続先ごと、古い順）。↑↓ でたどる。アプリを閉じれば消え、どこにも書き込まない。
   var commandHistory: [String: [String]] = [:]
 
   /// つなぐ前（接続先の一覧）は、Enter・L・O だけ。
   override var commands: [Operation: Command] {
-    browsing
+    if browsing && found != nil {
+      return foundCommands
+    }
+    return browsing
       ? [
         .enter: EnterCommand(),
         .reload: ReloadCommand(),
@@ -40,6 +59,7 @@ class SshPane: PathPane {
         .goToPath: SshGoToPath(),
         .signOut: SshDisconnect(),
         .shell: SshShell(),
+        .find: RemoteFind(),
         // 右の SSH のタブで G・F12 は、左へのコピー。左のローカルへのダウンロードか、左の SSH の接続先へ（そこからつないだとき）。
         .transfer: via == nil ? SshScp() : RightSshScp(),
       ]
@@ -55,7 +75,12 @@ class SshPane: PathPane {
   ]
 
   /// つなぐ前は、カーソル移動・ヘルプ・終了だけ。
-  override func allowsKey(_ id: String) -> Bool { browsing || Self.keysBeforeConnect.contains(id) }
+  override func allowsKey(_ id: String) -> Bool {
+    if found != nil {
+      return Self.foundKeys.contains(id)
+    }
+    return browsing || Self.keysBeforeConnect.contains(id)
+  }
 
   override var canClip: Bool { ssh != nil && !readOnly }
 
@@ -109,6 +134,9 @@ class SshPane: PathPane {
   }
 
   override var location: String {
+    if ssh != nil && found != nil {
+      return foundLocation
+    }
     if let current = ssh {
       if let archive {
         return "\(current.host):\(PathContext.posix.join(archive.path, archiveDir))"
@@ -159,6 +187,9 @@ class SshPane: PathPane {
       return try await fetch()
     }
     message = nil
+    if found != nil {
+      return try await fetchFound()
+    }
     if let archive {
       return archiveChildren(archive.items, archiveDir).map { item in
         Entry(name: item.name, isDir: item.isDir, size: item.isDir ? nil : item.size, modified: item.modified, data: item)
@@ -183,11 +214,15 @@ class SshPane: PathPane {
     }
   }
 
-  override var canGoUp: Bool { ssh != nil && (inArchive || dir != "/") }
+  override var canGoUp: Bool { ssh != nil && found == nil && (inArchive || dir != "/") }
 
   override var folderKey: String {
     if ssh == nil {
       return ""
+    }
+    // 検索の結果では、どのフォルダーでもないキーにする（読み直しで、開いていたフォルダーのマークを外さないため）。
+    if found != nil {
+      return "find:"
     }
     if let archive {
       return "\(PathContext.posix.join(archive.path, archiveDir))/"
@@ -221,6 +256,19 @@ class SshPane: PathPane {
 
   override func markable(_ entry: Entry) -> Bool { entry.data is RemoteEntry }
 
+  /// 接続先のファイルは、フルパスで見分ける（検索の結果でつけたマークも、そのフォルダーを開けば同じ項目になる）。
+  override func keyOf(_ entry: Entry) -> String { entry.data is RemoteEntry ? pathOf(entry) : super.keyOf(entry) }
+
+  /// 検索の結果は、同じ条件で探し直す（接続先で1回の実行で済むので、見つけたファイルだけを読み直すより簡単）。
+  override func refind(_ found: Found) async throws -> [FoundItem] {
+    guard let ssh else { return [] }
+    return try await findRemoteFiles(ssh, found.query)
+  }
+
+  override func foundData(_ item: FoundItem) -> Any {
+    RemoteEntry(name: PathContext.posix.basename(item.path), isDir: item.isDir, size: item.size, modified: item.modified, mode: item.mode.map { $0 & 0xfff })
+  }
+
   override func fetchUsage() async throws -> DiskUsage? { try await ssh?.usage(dir) }
 
   override func ownershipOf(_ entry: Entry) -> Ownership? {
@@ -242,6 +290,20 @@ class SshPane: PathPane {
 
   override func open(_ entry: Entry) async {
     do {
+      // 検索の結果のフォルダーは、結果を閉じてそこへ移る。
+      // ファイルは、画像・動画はダウンロードして開き、ほかは接続先のエディタで開く（圧縮ファイルの中には入らない）。
+      if let folder = leaveFoundForFolder(entry) {
+        try await goTo(folder)
+        return
+      }
+      if found != nil {
+        if previewKindOf(entry.name) != nil {
+          try await openDownloaded(entry)
+        } else {
+          await editFile(pathOf(entry))
+        }
+        return
+      }
       switch entry.data {
       case let host as SshHost:
         try await connect(host.host)
@@ -368,7 +430,17 @@ class SshPane: PathPane {
       controlPath = p.join(socketDir!, "master")
     }
     let next = Ssh(host, controlPath, via: via)
-    let quiet = await app.withProgress(tr("ssh_pane.connecting")) { (try? await next.connectWithoutPrompt()) ?? false }
+    let quiet: Bool
+    do {
+      quiet = try await app.withProgress(tr("ssh_pane.connecting")) { try await next.connectWithoutPrompt() }
+    } catch is CancellationError {
+      // Esc で中止した。認証を聞く端末には進まない。
+      await close(next)
+      await load(focus: host)
+      throw CancellationError()
+    } catch {
+      quiet = false
+    }
     let code = quiet ? 0 : try await connectInTerminal(next)
     if code != 0 {
       await close(next)
@@ -430,7 +502,6 @@ class SshPane: PathPane {
 
   /// [connection] のマスターの接続を閉じる。[Ssh.via] の接続先に作ったソケットのフォルダーも消す
   /// （つなぐ元の接続が切れていれば消せないが、マスターは1時間使わなければ閉じる）。
-  /// パスワードなどを、枠の中の端末で聞いてつなぐ（GUI 版）。失敗したら出力を残して Enter を待つ。終了コードを返す。
   private func connectInTerminal(_ connection: Ssh) async throws -> Int {
     let (executable, args) = try connection.connectCommand()
     return await runInTerminal(app, "$ ssh \(connection.host)", executable, args, waitAfterExit: { $0 != 0 })
@@ -457,6 +528,7 @@ class SshPane: PathPane {
 
   /// 接続先の一覧に戻すため、接続とその接続先の状態を忘れる（接続は閉じない）。
   private func forgetConnection() {
+    clearFound()
     ssh = nil
     marks.clear()
     names.removeAll()

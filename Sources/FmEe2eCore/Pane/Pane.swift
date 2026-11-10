@@ -1,4 +1,4 @@
-import Foundation
+import AppKit
 
 /// 一覧の1行。
 final class Entry {
@@ -209,7 +209,14 @@ class Pane {
   /// 上の帯の2行（容量と所有者の行）の代わりに出す、名前と値の組。nil ならいつもの容量と所有者を出す。
   var headerFields: [[(String, String)]]? { nil }
 
-  var current: Entry? { entries.isEmpty ? nil : entries[min(max(cursor, 0), entries.count - 1)] }
+  /// カーソルの項目。タイル表示では、タイルに出していない項目（タイルが1つもないとき）は nil。
+  var current: Entry? {
+    if entries.isEmpty {
+      return nil
+    }
+    let entry = entries[min(max(cursor, 0), entries.count - 1)]
+    return tiled && !tileable(entry) ? nil : entry
+  }
 
   /// 開いているフォルダー（[Mark.parent] と同じ形）。
   var folderKey: String { fatalError("folderKey") }
@@ -230,8 +237,11 @@ class Pane {
     guard let entry = current, !entry.isParent || includeParent else {
       return []
     }
-    return [Mark(entry, folderKey)]
+    return [markFor(entry)]
   }
+
+  /// [entry] をマークしたときのもの。ふつうは開いているフォルダーの項目（検索の結果は、そのファイルのあるフォルダー）。
+  func markFor(_ entry: Entry) -> Mark { Mark(entry, folderKey) }
 
   /// [targetsFor] の、親フォルダーを含めないもの。
   var targetMarks: [Mark] { targetsFor() }
@@ -267,6 +277,9 @@ class Pane {
       if !entries.isEmpty {
         cursor = nearestSelectable(cursor, 1)
       }
+      if tiled {
+        snapToTile()
+      }
     } catch {
       if generation != self.generation {
         return
@@ -299,6 +312,14 @@ class Pane {
     if entries.isEmpty {
       return
     }
+    if tiled {
+      let tiles = tileIndices
+      if !tiles.isEmpty {
+        let position = tiles.firstIndex(of: cursor) ?? 0
+        cursor = tiles[min(max(position + delta, 0), tiles.count - 1)]
+      }
+      return
+    }
     cursor = nearestSelectable(min(max(cursor + delta, 0), entries.count - 1), delta < 0 ? -1 : 1)
   }
 
@@ -326,7 +347,7 @@ class Pane {
     marks.removeAll { key, mark in mark.parent == folder && byKey[key] == nil }
     for key in marks.keys {
       if let fresh = byKey[key] {
-        marks[key] = Mark(fresh, folder)
+        marks[key] = markFor(fresh)
       }
     }
   }
@@ -343,22 +364,152 @@ class Pane {
     }
     let key = keyOf(entry)
     if marks.removeValue(forKey: key) == nil {
-      marks[key] = Mark(entry, folderKey)
+      marks[key] = markFor(entry)
     }
   }
 
   func toggleMark() {
-    if entries.isEmpty {
+    guard let entry = current else {
       return
     }
-    toggle(entries[cursor])
+    toggle(entry)
     move(1)
   }
 
-  /// 開いているフォルダーの中だけ反転する。
+  /// 開いているフォルダーの中だけ反転する。タイル表示では、タイルに出している項目だけ。
   func invertMarks() {
-    for entry in entries {
+    for entry in entries where !tiled || tileable(entry) {
       toggle(entry)
+    }
+  }
+
+  // ---- タイル表示（Ctrl+T） ----
+
+  /// Ctrl+T でタイル表示にした。
+  private var tileOn = false
+
+  /// 開いているフォルダーの画像・動画だけを、サムネイルのタイルで並べている（SSH の接続前などは、Ctrl+T を押していても一覧）。
+  var tiled: Bool { tileOn && canTile }
+
+  /// タイル表示にできるか（ファイルを一覧している）。
+  var canTile: Bool { false }
+
+  /// タイルに出す項目か（画像・動画のファイル）。
+  func tileable(_ entry: Entry) -> Bool {
+    canTile && !entry.isDir && !entry.isParent && previewKindOf(entry.name) != nil
+  }
+
+  /// タイルに出す項目の、[entries] での位置。
+  var tileIndices: [Int] { entries.indices.filter { tileable(entries[$0]) } }
+
+  /// 1行に並べるタイルの数（前回描いたときの値。↑↓ で1行分動かすのに使う）。
+  private(set) var tileColumns = 1
+
+  /// タイルの行のスクロール位置。
+  private var tileScroll = 0
+
+  private lazy var tileImages = TileImages(app)
+
+  /// タイル表示と一覧を切り替える。タイル表示にするときは、カーソルをタイルの項目に合わせる。マークはそのまま。
+  func toggleTiles() {
+    tileOn.toggle()
+    if tiled {
+      snapToTile()
+    }
+  }
+
+  /// カーソルがタイルの項目になければ、後ろ（なければ前）の一番近いタイルの項目に合わせる。
+  private func snapToTile() {
+    guard cursor >= 0, cursor < entries.count, !tileable(entries[cursor]) else {
+      return
+    }
+    let next = entries.indices.first { $0 > cursor && tileable(entries[$0]) } ?? entries.indices.last { $0 < cursor && tileable(entries[$0]) }
+    if let next {
+      cursor = next
+    }
+  }
+
+  /// タイル表示のサムネイル。作れなければ nil。
+  func thumbnail(_ entry: Entry, _ kind: PreviewKind) async -> NSImage? { nil }
+
+  /// サムネイルを作らずに、タイルに代わりに出す文（大きすぎる動画など）。作るなら nil。
+  func thumbnailNote(_ entry: Entry, _ kind: PreviewKind) -> String? { nil }
+
+  /// タイルの大きさ（桁・行）。名前の1行と、画像の行。右と下の1つずつは、タイルの間を空ける分。
+  private static let tileWidth = 22
+  private static let tileHeight = 11
+
+  /// 枠の中に、画像・動画のタイルを並べる（[x]・[y] から幅 [width]・[rows] 行）。各タイルの左上はマークのチェックボックス。
+  private func drawTiles(_ screen: Screen, _ x: Int, _ y: Int, _ width: Int, _ rows: Int, focused: Bool) {
+    let bg = Style()
+    let tiles = tileIndices
+    if tiles.isEmpty {
+      visibleRows = rows
+      screen.text(x + 1, y, tr("tiles.empty"), bg.copyWith(fg: Palette.muted))
+      return
+    }
+    let columns = max(1, width / Self.tileWidth)
+    let tileW = width / columns
+    let tileH = max(3, min(rows, Self.tileHeight))
+    let visibleTileRows = max(1, rows / tileH)
+    tileColumns = columns
+    visibleRows = columns * visibleTileRows
+    let rowCount = (tiles.count + columns - 1) / columns
+    let cursorRow = (tiles.firstIndex(of: cursor) ?? 0) / columns
+    tileScroll = fitScroll(cursor: cursorRow, scroll: tileScroll, length: rowCount, rows: visibleTileRows)
+    var wanted: [(id: String, make: () async -> NSImage?)] = []
+    // 項目を描いたタイルの位置（ドラッグで渡すパスを引くため）。
+    var placed: [(x: Int, y: Int, entry: Entry)] = []
+    for row in 0..<visibleTileRows {
+      for column in 0..<columns {
+        let index = (tileScroll + row) * columns + column
+        guard index < tiles.count else {
+          break
+        }
+        let entry = entries[tiles[index]]
+        let kind = previewKindOf(entry.name)!
+        let tx = x + column * tileW
+        let ty = y + row * tileH
+        placed.append((tx, ty, entry))
+        // 選んでいない窓のカーソルのタイルは、同じ色を8割透かす。
+        let style = tiles[index] == cursor ? bg.copyWith(bg: focused ? selection : selection.withOpacity(0.2)) : bg
+        screen.fill(tx, ty, tileW - 1, tileH - 1, style)
+        let marked = isMarked(entry)
+        screen.text(tx, ty, marked ? "[x]" : "[ ]", style.copyWith(fg: Palette.marked, bold: true))
+        screen.text(tx + 4, ty, truncate(entry.name, max(0, tileW - 5)), style.copyWith(fg: marked ? Palette.marked : fileColor, bold: marked))
+        // 画像は、名前の下から、タイルの間の1行・1桁の手前まで。
+        let (ix, iy, iw, ih) = (tx + 1, ty + 1, max(1, tileW - 3), max(1, tileH - 2))
+        let muted = style.copyWith(fg: Palette.muted)
+        if let note = thumbnailNote(entry, kind) {
+          screen.text(ix, iy, truncate(note, iw), muted)
+          continue
+        }
+        let id = "\(keyOf(entry))|\(entry.size.map(String.init) ?? "null")|\(entry.modified.map { "\($0.timeIntervalSince1970)" } ?? "null")"
+        switch tileImages.image(id) {
+        case .some(.some(let image)):
+          // 画像か動画かを、右下の印で見分けられるようにする。
+          screen.images.append(ScreenImage(ix, iy, iw, ih, image, badge: kind == .video ? "🎬" : "🪟"))
+        case .some(.none):
+          screen.text(ix, iy, truncate(tr("preview_overlay.unavailable"), iw), muted)
+        case .none:
+          screen.text(ix, iy, truncate(tr("preview_overlay.loading"), iw), muted)
+          wanted.append((id, { [weak self] in await self?.thumbnail(entry, kind) ?? nil }))
+        }
+      }
+    }
+    tileImages.request(wanted)
+    if dragsFiles {
+      screen.filesAt = { [weak self] cx, cy in
+        guard let self, let tile = placed.first(where: { cx >= $0.x && cx < $0.x + tileW && cy >= $0.y && cy < $0.y + tileH }) else {
+          return nil
+        }
+        return dragPaths(tile.entry)
+      }
+    }
+    // スクロール位置。
+    if rowCount > visibleTileRows {
+      let thumb = Int((Double(tileScroll) / Double(rowCount - visibleTileRows) * Double(rows - 1)).rounded())
+      screen.text(x + width, y + thumb, "┃", bg.copyWith(fg: accent))
     }
   }
 
@@ -414,6 +565,10 @@ class Pane {
         screen.text(x + 1, y + i, lines[i], bg.copyWith(fg: Palette.error))
       }
       screen.text(x + 1, y + min(lines.count, rows - 2) + 1, tr("pane.reload_hint"), bg.copyWith(fg: Palette.muted))
+      return
+    }
+    if tiled {
+      drawTiles(screen, x, y, width, rows, focused: focused)
       return
     }
     if entries.isEmpty {
@@ -516,6 +671,12 @@ class Pane {
   /// 右に出しているときの G・F12 の転送。右に出すタブだけが持つ。
   var transferCommand: Command? { nil }
 
+  /// Esc で閉じるもの（検索の結果など）を出していれば、その Esc の説明。なければ nil。
+  var escapeLabel: String? { nil }
+
+  /// [escapeLabel] のものを閉じて、元の一覧に戻る。
+  func closeByEscape() async {}
+
   /// コマンドではないキー（カーソル移動・マーク・プレビューなど）を使えるか。
   /// [id] はキーの名前、文字は「char:小文字」。
   func allowsKey(_ id: String) -> Bool { true }
@@ -525,8 +686,6 @@ class Pane {
 
   /// C・M（F2・F3）で選べるか（[makeClip] を持ち、読むだけの場所でない）。
   var canClip: Bool { false }
-
-  // ---- ほかのアプリとのファイルの受け渡し（GUI 版のドラッグ&ドロップ） ----
 
   /// 一覧の行を CapsLock 中のドラッグでほかのアプリに渡せ、ほかのアプリからのドロップを受け取るか。
   var dragsFiles: Bool { false }
@@ -545,14 +704,197 @@ class PathPane: Pane {
 
   var showHidden = false
 
+  override var canTile: Bool { true }
+
   /// [path] のフォルダーへ移り、[focus] の名前にカーソルを合わせる。
   func goToDir(_ path: String, focus: String? = nil) async {}
 
   /// [path] のファイルをエディタで開く。
   func editFile(_ path: String) async {}
 
-  func pathOf(_ entry: Entry) -> String { context.join(dirPath, entry.name) }
+  func pathOf(_ entry: Entry) -> String {
+    if found != nil, let path = foundPaths[ObjectIdentifier(entry)] {
+      return path
+    }
+    return context.join(dirPath, entry.name)
+  }
 
   /// マークした項目のフルパス。
   func pathOfMark(_ mark: Mark) -> String { context.join(mark.parent, mark.entry.name) }
+
+  // ---- 検索の結果（F・F9） ----
+  // 一覧の代わりに、窓いっぱいに出す。タブごとの継承クラスは、一覧の場所・使えるキーなどを [found] のときこの共通部分に任せる。
+
+  /// 一覧の代わりに出している検索の結果。
+  final class Found {
+    init(_ query: FindQuery, _ items: [FoundItem], focus: String?) {
+      self.query = query
+      self.items = items
+      paths = items.map(\.path)
+      self.focus = focus
+    }
+
+    let query: FindQuery
+
+    /// 探したときに読んだ結果。最初の読み込みで使い、そのあとは [refind] で読み直す。
+    var items: [FoundItem]?
+    let paths: [String]
+
+    /// 閉じたときにカーソルを戻す名前。
+    let focus: String?
+  }
+
+  private(set) var found: Found?
+
+  /// 結果の一覧の項目ごとのフルパス（項目の名前はファイルの名前だけなので）。
+  private var foundPaths: [ObjectIdentifier: String] = [:]
+
+  /// 検索の結果を、窓いっぱいの一覧に出す。中身で探したときは、ファイルの下に合った行と前後の行を出す。
+  func showFound(_ query: FindQuery, _ items: [FoundItem]) async {
+    found = Found(query, items, focus: current?.name)
+    resetCursor()
+    await load()
+  }
+
+  /// 検索の結果を出すのをやめる（読み直しはしない）。
+  func clearFound() {
+    found = nil
+    foundPaths = [:]
+  }
+
+  /// 検索の結果のフォルダー [entry] の上で Enter を押したときのフォルダーのパス。結果を閉じて、そこへ移るのに使う。
+  /// フォルダーでなければ nil（結果は閉じない）。
+  func leaveFoundForFolder(_ entry: Entry) -> String? {
+    guard found != nil, entry.isDir else { return nil }
+    let path = pathOf(entry)
+    clearFound()
+    resetCursor()
+    return path
+  }
+
+  /// 結果の一覧を読み直す（エディタで書き換えたあとなど）。
+  func refind(_ found: Found) async throws -> [FoundItem] { [] }
+
+  /// 結果のファイルの行の [Entry.data]（ローカルは LocalFile、接続先は RemoteEntry）。
+  func foundData(_ item: FoundItem) -> Any { fatalError("foundData") }
+
+  /// [found] のときの [fetch]。ファイルの行の下に、合った行・前後の行を置き、中身で探したときはファイルごとに1行空ける。
+  func fetchFound() async throws -> [Entry] {
+    guard let found else {
+      return []
+    }
+    let items: [FoundItem]
+    if let first = found.items {
+      items = first
+      found.items = nil
+    } else {
+      items = try await refind(found)
+    }
+    var paths: [ObjectIdentifier: String] = [:]
+    var list: [Entry] = []
+    for item in items {
+      if !list.isEmpty && !found.query.content.isEmpty {
+        list.append(Entry(name: "", isDir: false, data: FoundLine(.blank)))
+      }
+      let file = Entry(
+        name: context.basename(item.path), isDir: item.isDir, size: item.size, modified: item.modified,
+        executable: !item.isDir && (item.mode ?? 0) & 0x49 != 0, mode: item.mode.map { $0 & 0xfff }, data: foundData(item)
+      )
+      paths[ObjectIdentifier(file)] = item.path
+      list.append(file)
+      list += item.lines.map { Entry(name: "", isDir: false, data: $0) }
+    }
+    foundPaths = paths
+    return list
+  }
+
+  override var escapeLabel: String? { found == nil ? nil : tr("find.close") }
+
+  /// 検索の結果を閉じて、元のフォルダーの一覧に戻る。マークはそのまま残す。
+  override func closeByEscape() async {
+    guard let found else {
+      return
+    }
+    clearFound()
+    resetCursor()
+    await load(focus: found.focus)
+  }
+
+  /// 検索の結果で使えるキー（カーソル移動・Enter・E・マーク・Esc）。
+  static let foundKeys: Set<String> = [
+    "up", "down", "pageUp", "pageDown", "home", "end", "enter", "char:e", "char: ", "char:　", "escape",
+  ]
+
+  /// 検索の結果で使えるコマンド（Enter・E）。
+  var foundCommands: [Operation: Command] { [.enter: EnterCommand(), .edit: PathEdit()] }
+
+  /// 検索の結果を出しているときの、上の場所の行。
+  var foundLocation: String { tr("find.location", ["count": found?.paths.count ?? 0, "path": found?.query.root ?? ""]) }
+
+  /// 合った行・前後の行にはカーソルが乗らず、マークもできない。
+  override func selectable(_ entry: Entry) -> Bool { !(entry.data is FoundLine) }
+
+  override func markable(_ entry: Entry) -> Bool { !(entry.data is FoundLine) }
+
+  /// 結果のファイルのマークは、そのファイルのあるフォルダーのものにする（閉じたあと、そのフォルダーを開けばマークが見える）。
+  override func markFor(_ entry: Entry) -> Mark { found == nil ? super.markFor(entry) : Mark(entry, context.dirname(pathOf(entry))) }
+
+  /// 検索の結果は、探し始めたフォルダーからの相対パスで出し、合った行と前後の行はその下に字下げして出す。
+  override func drawRow(_ screen: Screen, _ entry: Entry, _ x: Int, _ y: Int, _ width: Int, _ style: Style, marked: Bool) {
+    guard let found else {
+      super.drawRow(screen, entry, x, y, width, style, marked: marked)
+      return
+    }
+    if let line = entry.data as? FoundLine {
+      switch line.kind {
+      case .gap:
+        screen.text(x + 4, y, "…", style.copyWith(fg: Palette.muted))
+        return
+      case .more:
+        screen.text(x + 4, y, truncate(tr("find.more"), max(0, width - 4)), style.copyWith(fg: Palette.muted))
+        return
+      case .blank:
+        return
+      case .line:
+        break
+      }
+      let label = padLeft(String(line.number), 6) + ": "
+      screen.text(x + 4, y, label, style.copyWith(fg: line.matched ? Palette.lime : Palette.muted, bold: line.matched))
+      drawFoundText(screen, line, x + 4 + textWidth(label), y, x + width, style)
+      return
+    }
+    let relative = Entry(
+      name: context.relative(pathOf(entry), from: found.query.root), isDir: entry.isDir, size: entry.size, modified: entry.modified,
+      executable: entry.executable, mode: entry.mode, isLink: entry.isLink, data: entry.data
+    )
+    super.drawRow(screen, relative, x, y, width, style, marked: marked)
+  }
+
+  /// 合った行・前後の行の中身を [x] から [limit] の手前まで描く。合った部分は検索の色（find.match）の太字にする。
+  private func drawFoundText(_ screen: Screen, _ line: FoundLine, _ x: Int, _ y: Int, _ limit: Int, _ style: Style) {
+    let base = style.copyWith(fg: line.matched ? Palette.text : Palette.muted)
+    let characters = Array(line.text)
+    // 合った部分とそれ以外に分ける。
+    var parts: [(text: ArraySlice<Character>, hit: Bool)] = []
+    var position = 0
+    for range in line.matches where range.lowerBound >= position && range.upperBound <= characters.count {
+      parts.append((characters[position..<range.lowerBound], false))
+      parts.append((characters[range], true))
+      position = range.upperBound
+    }
+    parts.append((characters[position...], false))
+    var col = x
+    for part in parts where !part.text.isEmpty {
+      // タブは空白にし、制御文字は出さない（桁がずれないように）。
+      let text = String(String(part.text).replacingOccurrences(of: "\t", with: "    ").unicodeScalars.map { $0.value < 0x20 ? " " : Character($0) })
+      guard col < limit else {
+        return
+      }
+      let shown = truncate(text, limit - col)
+      col += screen.text(col, y, shown, part.hit ? base.copyWith(fg: Palette.findMatch, bold: true) : base)
+      if shown != text {
+        return
+      }
+    }
+  }
 }

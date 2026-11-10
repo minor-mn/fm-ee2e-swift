@@ -1,6 +1,5 @@
 import AppKit
 
-/// Markdown のプレビューの本文。[top] 行目から [rows] 行を出す。GUI 版では、ホイールで [top] を動かし、マウスで選んでコピーできる。
 final class MarkdownScroll: SelectionSource {
   init(_ app: App) {
     self.app = app
@@ -36,7 +35,7 @@ final class MarkdownScroll: SelectionSource {
   }
 }
 
-/// ローカルの窓のカーソルの画像・動画（SSH の窓では画像だけ）を、反対側の窓の上に重ねて出す。
+/// ローカルの窓のカーソルの画像・動画（SSH の窓では画像だけ、Google Drive の窓では動画は小さいものだけ）を、反対側の窓の上に重ねて出す。
 final class PreviewOverlay {
   init(_ app: App) {
     self.app = app
@@ -54,10 +53,21 @@ final class PreviewOverlay {
   /// 作ったプレビュー。作れなかったものは nil。
   private var previews = OrderedMap<String, NSImage?>()
 
+  /// 大きすぎてプレビューしないと案内した Google Drive の動画（[previewId]）。カーソルが離れるまで、案内し直さない。
+  private var tooLargeId: String?
+
   /// プレビューがオンで、窓 [pane] のカーソルがプレビューできるファイルに乗っていれば、その項目と種類。
   /// SSH の窓では、画像だけ（動画は大きく、ファイルをまるごと読まないと1コマも出せないため）。
+  /// Google Drive の窓では、動画は [DrivePane.videoPreviewLimit] 以下のものだけ。大きいものは、出さずにステータスに案内する。
   /// Markdown は、ローカルの窓の、圧縮ファイルの中でないものだけ。
   func target(_ pane: Pane) -> (Entry, PreviewKind)? {
+    var tooLarge: String?
+    defer {
+      if let tooLarge, tooLarge != tooLargeId {
+        app.showStatus(tr("preview_overlay.too_large", ["size": formatBytes(DrivePane.videoPreviewLimit)]))
+      }
+      tooLargeId = tooLarge
+    }
     if !on || !pane.ready {
       return nil
     }
@@ -72,6 +82,13 @@ final class PreviewOverlay {
     }
     if let ssh = pane as? SshPane {
       return kind == .image && ssh.ssh != nil && entry.data is RemoteEntry ? (entry, kind) : nil
+    }
+    if let drive = pane as? DrivePane {
+      if drive.tooLargeToPreview(entry, kind) {
+        tooLarge = previewId(pane, entry)
+        return nil
+      }
+      return (entry, kind)
     }
     return pane is LocalPane ? (entry, kind) : nil
   }
@@ -97,7 +114,7 @@ final class PreviewOverlay {
     screen.box(x, y, w, h, bg.copyWith(fg: Palette.outline), title: "Preview", titleStyle: bg.copyWith(fg: Palette.lime))
     screen.text(x + 1, y + 1, truncate(entry.name, w - 2), bg.copyWith(fg: Palette.muted))
     if let image = previews[id] ?? nil {
-      screen.image = ScreenImage(x + 1, y + 2, w - 2, h - 3, image)
+      screen.images.append(ScreenImage(x + 1, y + 2, w - 2, h - 3, image))
     } else {
       screen.text(x + 2, y + 2, previews.containsKey(id) ? tr("preview_overlay.unavailable") : tr("preview_overlay.loading"), bg.copyWith(fg: Palette.muted))
     }
@@ -106,7 +123,6 @@ final class PreviewOverlay {
   /// 読んだ Markdown。[stamp]（更新日時と大きさ）か幅が変われば読み直す。読めなければ [lines] は nil。
   private var markdown: (path: String, stamp: String, width: Int, lines: [MarkdownLine]?)?
 
-  /// Markdown の本文のスクロールと、GUI 版のマウスでの選択。別のファイルにしたら先頭に戻す（保存し直しでは戻さない）。
   private lazy var markdownView = MarkdownScroll(app)
 
   /// Markdown のファイル [path] を、整えて描く。描くたびに更新日時を見るので、エディタで保存すれば描き直す。
@@ -136,7 +152,6 @@ final class PreviewOverlay {
     view.lines = lines
     view.rows = max(0, h - 3)
     view.top = min(max(view.top, 0), max(0, lines.count - view.rows))
-    // 本文は重ねた画面に描き、GUI 版ではホイールでスクロールでき、マウスで選んでコピーできるようにする（見えていない行も含む）。
     screen.layer(x + 2, y + 2, width, view.rows, theme: screen.theme, selection: view) { s in
       s.fill(0, 0, s.width, s.height, bg)
       for (row, line) in lines.dropFirst(view.top).prefix(s.height).enumerated() {
@@ -162,6 +177,8 @@ final class PreviewOverlay {
     var image: NSImage?
     if let local = pane as? LocalPane {
       image = (try? await local.preview(entry) { path in await makePreview(path, kind) }) ?? nil
+    } else if let drive = pane as? DrivePane {
+      image = (try? await drive.preview(entry) { path in await makePreview(path, kind) }) ?? nil
     } else if let ssh = pane as? SshPane, let connection = ssh.ssh {
       image = (try? await connection.run("cat \(shQuote(ssh.pathOf(entry)))")).flatMap(makePreview)
     }

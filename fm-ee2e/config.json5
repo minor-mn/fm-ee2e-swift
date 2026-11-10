@@ -3,7 +3,6 @@
   // 画面の言葉（languages/<language>.json5）。ja（日本語）・en（英語）。書かなければ ja。
   language: "en",
 
-  // ¥キーで \ を、Option+¥ で ¥ を入力する（macOS の既定の逆）。GUI 版だけ。書かなければ true。
   yen_to_backslash: true,
 
   // 右の窓に出すタブ。0 にしたタブは出さない。1 以上は小さい順に Tab で切り替える。
@@ -66,6 +65,12 @@
       // 窓の先頭の場所（パス）。タブごとにも書ける。
       location: {
         color: "#666666",
+      },
+      // 検索（F）で、ファイル内容に合った文字列。タブごとにも書ける。
+      find: {
+        match: {
+          color: "#A6FF4D",
+        },
       },
     },
 

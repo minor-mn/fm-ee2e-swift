@@ -37,6 +37,35 @@ struct NativeContainerDefinition {
     if needsCpus { settings.cpus = Self.defaultCpus }
     return try settings.applied(to: self)
   }
+
+  /// この設定で使い捨てのコンテナを作り、[command] を sh で実行して消す container run の引数（docker compose run --rm と同じ）。
+  /// 名前・ラベル・公開ポート・ネットワークの別名は、動いている本体とぶつかるので外す。端末で答えられるように -it はいつもつける。
+  /// イメージの位置がわからなければ nil。
+  func runArgs(_ command: String) -> [String]? {
+    guard let imageAt = ContainerSettings.imageIndex(self) else { return nil }
+    var options: [String] = []
+    var index = 1
+    while index < imageAt {
+      let flag = create[index]
+      let value = index + 1 < imageAt ? create[index + 1] : ""
+      switch flag {
+      case "--name", "--label", "--publish":
+        index += 2
+        continue
+      case "--network":
+        options += [flag, value.components(separatedBy: ",").filter { !$0.hasPrefix("alias=") }.joined(separator: ",")]
+        index += 2
+        continue
+      default:
+        options.append(flag)
+        index += 1
+      }
+    }
+    for (long, short) in [("--interactive", "-i"), ("--tty", "-t")] where !options.contains(long) && !options.contains(short) {
+      options.append(long)
+    }
+    return ["run", "--rm"] + options + [image, "/bin/sh", "-c", command]
+  }
 }
 
 /// --volume の1件。[source] は Mac のパス（バインド）かボリューム名、[target] はコンテナの中のパス。
@@ -169,7 +198,24 @@ struct NativeContainerProject {
   let definitions: [NativeContainerDefinition]
   var awsProfile: String? = nil
 
+  /// プロジェクトの設定。このフォルダーで並べるコンテナの名前（とAWS のプロファイル）だけを持つ。
   static func settings(_ root: String) -> String { p.join(root, ".fm-ee2e", "project.json5") }
+
+  /// コンテナごとの作成設定を置くフォルダー。コンテナ名は Mac 全体で一意なので、どのプロジェクトのものも名前で1か所に置く
+  /// （プロジェクトに属さない共通のコンテナも、どのフォルダーからでも引ける）。
+  static var containersDirectory: String { p.join(homeDir, ".config", "fm-ee2e", "containers") }
+
+  /// コンテナ [name] の作成設定のファイル。
+  static func definitionFile(_ name: String) -> String { p.join(containersDirectory, "\(name).json5") }
+
+  /// コンテナ名・サービス名に使える名前（ファイル名にもする）。
+  static func validName(_ name: String) -> Bool { name.range(of: #"^[A-Za-z0-9][A-Za-z0-9_.-]*$"#, options: .regularExpression) != nil }
+
+  /// コンテナ [name] の保存済みの作成設定。プロジェクトに入っていなくても読める。なければ nil。
+  static func savedDefinition(_ name: String) -> NativeContainerDefinition? {
+    guard validName(name), FileManager.default.fileExists(atPath: definitionFile(name)) else { return nil }
+    return try? parse(definitionFile(name))
+  }
 
   /// 子フォルダーでも同じ設定を使う。独自設定がある子プロジェクトはそちらを優先する。
   static func findRoot(_ directory: String) -> String? {
@@ -182,28 +228,42 @@ struct NativeContainerProject {
     }
   }
 
-  static func read(_ root: String) throws -> NativeContainerProject {
-    func object(_ path: String) throws -> [String: Any] {
-      guard let value = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: path)), options: [.json5Allowed]) as? [String: Any] else {
-        throw AppError(tr("container.invalid_saved_config", ["file": path]))
-      }
-      return value
+  private static func object(_ path: String) throws -> [String: Any] {
+    guard let value = try JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: path)), options: [.json5Allowed]) as? [String: Any] else {
+      throw AppError(tr("container.invalid_saved_config", ["file": path]))
     }
+    return value
+  }
+
+  /// [path] の作成設定を読む。
+  private static func parse(_ path: String) throws -> NativeContainerDefinition {
+    let value = try object(path)
+    guard let service = value["service"] as? String, let name = value["name"] as? String,
+      let image = value["image"] as? String, let create = value["create"] as? [String], let prepare = value["prepare"] as? [[String]]
+    else { throw AppError(tr("container.invalid_saved_config", ["file": path])) }
+    let problem = value["problem"] as? String
+    guard problem != nil || (create.first == "create" && create.indices.contains(2) && create[1] == "--name" && create[2] == name),
+      prepare.allSatisfy({ $0.first == "build" || $0.starts(with: ["network", "create"]) || $0.starts(with: ["volume", "create"]) })
+    else { throw AppError(tr("container.invalid_saved_config", ["file": path])) }
+    guard validName(service), validName(name) else { throw AppError(tr("container.invalid_saved_config", ["file": path])) }
+    return NativeContainerDefinition(service: service, name: name, image: image, create: create, prepare: prepare, problem: problem, notes: value["notes"] as? [String] ?? [])
+  }
+
+  static func read(_ root: String) throws -> NativeContainerProject {
     let project = try object(settings(root))
-    guard let files = project["containers"] as? [String] else { throw AppError(tr("container.invalid_saved_config", ["file": settings(root)])) }
-    let definitions = try files.map { file -> NativeContainerDefinition in
-      guard p.basename(file) == file, file.hasSuffix(".json5") else { throw AppError(tr("container.invalid_saved_config", ["file": file])) }
-      let path = p.join(root, ".fm-ee2e", "containers", file)
-      let value = try object(path)
-      guard let service = value["service"] as? String, let name = value["name"] as? String,
-        let image = value["image"] as? String, let create = value["create"] as? [String], let prepare = value["prepare"] as? [[String]]
-      else { throw AppError(tr("container.invalid_saved_config", ["file": path])) }
-      let problem = value["problem"] as? String
-      guard problem != nil || (create.first == "create" && create.indices.contains(2) && create[1] == "--name" && create[2] == name),
-        prepare.allSatisfy({ $0.first == "build" || $0.starts(with: ["network", "create"]) || $0.starts(with: ["volume", "create"]) })
-      else { throw AppError(tr("container.invalid_saved_config", ["file": path])) }
-      guard service.range(of: #"^[A-Za-z0-9][A-Za-z0-9_.-]*$"#, options: .regularExpression) != nil else { throw AppError(tr("container.invalid_saved_config", ["file": path])) }
-      return NativeContainerDefinition(service: service, name: name, image: image, create: create, prepare: prepare, problem: problem, notes: value["notes"] as? [String] ?? [])
+    guard let names = project["containers"] as? [String] else { throw AppError(tr("container.invalid_saved_config", ["file": settings(root)])) }
+    // 以前の形（プロジェクトの .fm-ee2e/containers/<サービス>.json5 を並べたもの）なら、名前で containersDirectory に写し、
+    // 一覧を名前に書き換えて読み直す。同じ名前の設定がすでにあればそちらを使う（save は既存のファイルを書き直さない）。古いファイルは残す。
+    let legacy = p.join(root, ".fm-ee2e", "containers")
+    if !names.isEmpty, names.allSatisfy({ $0.hasSuffix(".json5") && p.basename($0) == $0 && FileManager.default.fileExists(atPath: p.join(legacy, $0)) }) {
+      try NativeContainerProject(root: root, definitions: try names.map { try parse(p.join(legacy, $0)) }, awsProfile: project["aws_profile"] as? String).save()
+      return try read(root)
+    }
+    let definitions = try names.map { name -> NativeContainerDefinition in
+      guard validName(name) else { throw AppError(tr("container.invalid_saved_config", ["file": settings(root)])) }
+      let definition = try parse(definitionFile(name))
+      guard definition.name == name else { throw AppError(tr("container.invalid_saved_config", ["file": definitionFile(name)])) }
+      return definition
     }
     guard Set(definitions.map(\.name)).count == definitions.count else { throw AppError(tr("container.duplicate_names")) }
     return NativeContainerProject(root: root, definitions: definitions, awsProfile: project["aws_profile"] as? String)
@@ -231,7 +291,7 @@ struct NativeContainerProject {
 
   /// docker-compose から作り直した設定を保存して返す（L で読み直すとき）。保存済みの設定は compose とずれてはいけないので、
   /// compose から来た設定はすべて取り込み直し、compose から来ていない設定（Dockerfile・Containerfile から作ったもの）だけを残す。
-  /// 設定のファイルは書き直し、使わなくなったものは消す。
+  /// 設定のファイルは書き直す。使わなくなったファイルは、ほかのプロジェクトが使っているかもしれないので残す。
   static func rebuild(_ compose: ComposeProject, root: String) throws -> NativeContainerProject {
     let existing = FileManager.default.fileExists(atPath: settings(root)) ? try? read(root) : nil
     let draft = try importDraft(compose)
@@ -243,26 +303,27 @@ struct NativeContainerProject {
     }
     let kept = (existing?.definitions ?? []).filter { !fromCompose($0) && !names.contains($0.name) && !services.contains($0.service) }
     let project = NativeContainerProject(root: root, definitions: draft.definitions + kept, awsProfile: existing?.awsProfile)
-    let directory = p.join(root, ".fm-ee2e", "containers")
-    try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+    try createDirectories(root)
     for definition in project.definitions { try write(definition.json, project.file(definition)) }
-    let used = Set(project.definitions.map { "\($0.service).json5" })
-    for name in (try? FileManager.default.contentsOfDirectory(atPath: directory)) ?? [] where name.hasSuffix(".json5") && !used.contains(name) {
-      try? FileManager.default.removeItem(atPath: p.join(directory, name))
-    }
     try project.save()
     return project
   }
 
-  func file(_ definition: NativeContainerDefinition) -> String { p.join(root, ".fm-ee2e", "containers", "\(definition.service).json5") }
+  func file(_ definition: NativeContainerDefinition) -> String { Self.definitionFile(definition.name) }
 
+  private static func createDirectories(_ root: String) throws {
+    for directory in [containersDirectory, p.join(root, ".fm-ee2e")] {
+      try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+    }
+  }
+
+  /// プロジェクトの一覧を書き、まだファイルのない作成設定を書く（ある設定は書き直さない）。
   func save() throws {
-    let directory = p.join(root, ".fm-ee2e", "containers")
-    try FileManager.default.createDirectory(atPath: directory, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
+    try Self.createDirectories(root)
     for definition in definitions where !FileManager.default.fileExists(atPath: file(definition)) {
       try Self.write(definition.json, file(definition))
     }
-    var project: [String: Any] = ["containers": definitions.map { "\($0.service).json5" }]
+    var project: [String: Any] = ["containers": definitions.map(\.name)]
     if let awsProfile { project["aws_profile"] = awsProfile }
     try Self.write(project, Self.settings(root))
   }

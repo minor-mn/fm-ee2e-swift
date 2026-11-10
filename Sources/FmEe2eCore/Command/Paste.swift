@@ -52,6 +52,10 @@ class PasteCommand: Command {
       first = try await c.app.withProgress(move ? tr("paste.moving") : tr("paste.copying")) { try await body(conflicts, &errors) }
     } catch is PlanCancelled {
       // 途中で中止。済んだ分はそのまま。
+    } catch is CancellationError {
+      // Esc で中止。済んだ分はそのまま。止めたコマンドの失敗は知らせない。
+      c.app.showStatus(tr("dialogs.aborted"))
+      return first
     }
     if !errors.isEmpty {
       await c.app.showError(errors.joined(separator: "\n"))
@@ -91,6 +95,8 @@ class PathPasteCommand: PasteCommand {
       var first: String?
       var existing = try await names(c, dest)
       for from in paths(clip) {
+        // Esc で中止したら、残りは貼り付けない。
+        try Task.checkCancellation()
         let name = context.basename(from)
         if move && context.equals(context.dirname(from), dest) {
           continue
@@ -208,6 +214,8 @@ final class DrivePaste: PasteCommand {
       var first: String?
       var existing = try await pane.itemsIn(dest)
       for item in (clip as! DriveClip).items {
+        // Esc で中止したら、残りは貼り付けない。
+        try Task.checkCancellation()
         let name = item.name
         if move && p.equals(p.dirname(item.path), dest) {
           continue

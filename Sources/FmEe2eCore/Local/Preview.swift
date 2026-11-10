@@ -40,7 +40,7 @@ private let previewSize = 1600
 func makePreview(_ path: String, _ kind: PreviewKind) async -> NSImage? {
   switch kind {
   case .image:
-    return NSImage(contentsOfFile: path).flatMap(shrink)
+    return NSImage(contentsOfFile: path).flatMap { shrink($0, previewSize) }
   case .video:
     let request = QLThumbnailGenerator.Request(
       fileAt: URL(fileURLWithPath: path),
@@ -60,16 +60,38 @@ func makePreview(_ path: String, _ kind: PreviewKind) async -> NSImage? {
 
 /// 画像のデータ [data] のプレビュー（SSH の接続先から読んだもの）。読めなければ nil。
 func makePreview(_ data: Data) -> NSImage? {
-  NSImage(data: data).flatMap(shrink)
+  NSImage(data: data).flatMap { shrink($0, previewSize) }
 }
 
-/// [image] の長い辺が [previewSize] を超えていれば縮める。大きさが分からなければ nil。
-private func shrink(_ image: NSImage) -> NSImage? {
+/// タイル表示のサムネイルの長い辺の上限（ピクセル）。
+private let thumbnailSize = 400
+
+/// [path] の画像・動画のタイル表示のサムネイル（Quick Look）。作れなければ nil。
+func makeThumbnail(_ path: String) async -> NSImage? {
+  let request = QLThumbnailGenerator.Request(
+    fileAt: URL(fileURLWithPath: path),
+    size: CGSize(width: thumbnailSize, height: thumbnailSize),
+    scale: 1,
+    representationTypes: .thumbnail
+  )
+  if let thumbnail = try? await QLThumbnailGenerator.shared.generateBestRepresentation(for: request) {
+    return thumbnail.nsImage
+  }
+  return NSImage(contentsOfFile: path).flatMap { shrink($0, thumbnailSize) }
+}
+
+/// 画像のデータ [data] のタイル表示のサムネイル（SSH の接続先から読んだもの）。読めなければ nil。
+func makeThumbnail(_ data: Data) -> NSImage? {
+  NSImage(data: data).flatMap { shrink($0, thumbnailSize) }
+}
+
+/// [image] の長い辺が [limit] を超えていれば縮める。大きさが分からなければ nil。
+private func shrink(_ image: NSImage, _ limit: Int) -> NSImage? {
   let pixels = image.representations.map { CGSize(width: $0.pixelsWide, height: $0.pixelsHigh) }.max { $0.width < $1.width }
   guard let pixels, pixels.width > 0, pixels.height > 0 else {
     return nil
   }
-  let scale = min(1, Double(previewSize) / max(pixels.width, pixels.height))
+  let scale = min(1, Double(limit) / max(pixels.width, pixels.height))
   if scale == 1 {
     return image
   }

@@ -20,8 +20,17 @@ enum Operation: Hashable {
   case signOut
   case shell
 
-  /// F・F9。ファイルのフォーマットの変換。
+  /// F・F9。対象が変換できるファイルのときの、ファイルのフォーマットの変換。
   case format
+
+  /// F・F9。[format] が使えないとき。
+  case find
+
+  /// Ctrl+C。Container タブの一覧に使う Compose ファイルを選ぶ。
+  case compose
+
+  /// B。コマンドのブックマークの一覧（選んでいるタブの S のコマンドで開く。[BookmarksCommand]）。
+  case bookmarks
 
   /// G・F12。右のタブの転送（[Pane.transferCommand]）。
   case transfer

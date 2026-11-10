@@ -79,7 +79,15 @@ class Ssh {
   func connectWithoutPrompt() async throws -> Bool {
     let process = try RunningProcess(Ssh.executable, try masterArgs(batch: true))
     // 裏に回ったマスターが出力をつないだままにしても待たないよう、出力は読み捨てて（onStdout・onStderr なし）終了コードだけを待つ。
-    return await process.exitCode == 0
+    // 呼んだ Task が取り消されたら（Esc）、ssh を止めて [CancellationError] を投げる。
+    let pid = process.pid
+    let code = await withTaskCancellationHandler {
+      await process.exitCode
+    } onCancel: {
+      Darwin.kill(pid, SIGTERM)
+    }
+    try Task.checkCancellation()
+    return code == 0
   }
 
   /// マスターの接続が生きているか。
@@ -187,12 +195,18 @@ class Ssh {
   }
 
   /// 接続先の `sh -c` で git を [args] で実行する引数。[tty] なら端末を割り当てる（push の認証などを聞かれても答えられるように）。
-  func gitArgs(_ args: [String], tty: Bool = false) throws -> [String] {
+  /// [dir] があれば、そこへ移ってから実行する（git -C が使えない古い git のため）。
+  func gitArgs(_ args: [String], dir: String? = nil, tty: Bool = false) throws -> [String] {
     try wrap(
       options + (tty ? ["-tt"] : [])
-        + ["--", host, "sh -c \(try shellWord("exec git \(args.map(shQuote).joined(separator: " "))"))"],
+        + ["--", host, "sh -c \(try shellWord(gitScript(args, dir: dir)))"],
       tty: tty
     )
+  }
+
+  /// [dir] があればそこへ移って、git を [args] で実行する sh のスクリプト。
+  func gitScript(_ args: [String], dir: String?) -> String {
+    (dir.map { "cd \(shQuote($0)) && " } ?? "") + "exec git \(args.map(shQuote).joined(separator: " "))"
   }
 
   /// 端末を割り当てて、[dir] で [script] を `sh -c` に実行させる引数。

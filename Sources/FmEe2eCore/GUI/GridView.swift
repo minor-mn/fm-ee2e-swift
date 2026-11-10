@@ -214,24 +214,28 @@ final class GridView: NSView, NSTextInputClient {
   }
 
   /// [image] を [frame] に [mode] で置く。fit と center では、[frame] の幅・高さの [maxWidth]・[maxHeight] の割合を
-  /// 上限に縮め（center は元の大きさより大きくしない）、[align] の位置に置く。
+  /// 上限に縮め（center は元の大きさより大きくしない）、[align] の位置に置く。置いた場所を返す（tile は nil）。
+  @discardableResult
   private func drawImage(
     _ context: CGContext, _ image: NSImage, _ mode: ImageMode, _ frame: CGRect, _ opacity: Double,
     align: ImageAlign = .center, maxWidth: Double = 1, maxHeight: Double = 1
-  ) {
+  ) -> CGRect? {
     let size = image.size
     if size.width <= 0 || size.height <= 0 {
-      return
+      return nil
     }
     context.saveGState()
     context.clip(to: frame)
     func draw(_ rect: CGRect) {
       image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: CGFloat(opacity), respectFlipped: true, hints: nil)
     }
+    var placed: CGRect?
     /// 大きさ [w]・[h] の画像を、[align] の位置に置く。
     func place(_ w: CGFloat, _ h: CGFloat) {
       let (fx, fy) = align.factors
-      draw(CGRect(x: frame.minX + (frame.width - w) * fx, y: frame.minY + (frame.height - h) * fy, width: w, height: h))
+      let rect = CGRect(x: frame.minX + (frame.width - w) * fx, y: frame.minY + (frame.height - h) * fy, width: w, height: h)
+      draw(rect)
+      placed = rect
     }
     let limitX = frame.width * maxWidth / size.width
     let limitY = frame.height * maxHeight / size.height
@@ -257,6 +261,16 @@ final class GridView: NSView, NSTextInputClient {
       }
     }
     context.restoreGState()
+    return placed
+  }
+
+  /// 画像を置いた場所 [rect] の右下に、印 [badge]（絵文字）を重ねる。
+  private func drawBadge(_ badge: String, _ rect: CGRect) {
+    let size = min(max(min(rect.width, rect.height) / 6, 10), 24)
+    let text = NSAttributedString(string: badge, attributes: [.font: NSFont.systemFont(ofSize: size)])
+    let bounds = text.size()
+    let inset = size * 0.2
+    text.draw(at: CGPoint(x: rect.maxX - bounds.width - inset, y: rect.maxY - bounds.height - inset))
   }
 
   /// [rect] の下にあるものを消し、窓全体の背景（と見た目 [theme] のタブの背景を [frame] に合わせて）を塗り直す。
@@ -359,9 +373,11 @@ final class GridView: NSView, NSTextInputClient {
         x = end
       }
     }
-    if let image = screen.image {
+    for image in screen.images {
       let frame = cellRect(image.x, image.y, image.w).union(cellRect(image.x, image.y + image.h - 1, image.w))
-      drawImage(context, image.image, .fit, frame, 1)
+      if let placed = drawImage(context, image.image, .fit, frame, 1), let badge = image.badge {
+        drawBadge(badge, placed)
+      }
     }
     for layer in screen.layers {
       let frame = cellRect(layer.x, layer.y, layer.w).union(cellRect(layer.x, layer.y + max(0, layer.h - 1), layer.w))
@@ -655,10 +671,10 @@ final class GridView: NSView, NSTextInputClient {
       openLink(at: point)
       return
     }
-    // 後ろにあるときか CapsLock 中にファイルの行を押したら、範囲選択ではなく、ドラッグでほかのアプリに渡す準備をする。
+    // CapsLock 中にファイルの行を押したら、範囲選択ではなく、ドラッグでほかのアプリに渡す準備をする。
     let fromBehind = clickedBehind || !NSApp.isActive
     clickedBehind = false
-    if let files = filesToDrag(event, fromBehind: fromBehind) {
+    if let files = filesToDrag(event) {
       pendingFiles = files
       pendingFromBehind = fromBehind
       if selection != nil {
@@ -743,21 +759,21 @@ final class GridView: NSView, NSTextInputClient {
   /// 後ろにあるときに、ファイルの行を押した（[shouldDelayWindowOrdering] から [mouseDown] へ伝える）。
   private var clickedBehind = false
 
-  /// [event] がファイルの行を押したもので、後ろにあるとき（[fromBehind]）か CapsLock 中なら、その行を掴んだときに渡すパス。
-  private func filesToDrag(_ event: NSEvent, fromBehind: Bool) -> [String]? {
-    guard fromBehind || event.modifierFlags.contains(.capsLock) else { return nil }
+  /// [event] が CapsLock 中にファイルの行を押したものなら、その行を掴んだときに渡すパス。後ろにあるときも CapsLock 中だけ。
+  private func filesToDrag(_ event: NSEvent) -> [String]? {
+    guard event.modifierFlags.contains(.capsLock) else { return nil }
     let point = convert(event.locationInWindow, from: nil)
     guard let (_, s, origin) = selectable(at: point), let filesAt = s.filesAt else { return nil }
     let (x, y) = cellAt(point, s, origin)
     return filesAt(x, y)
   }
 
-  /// 後ろにある（ほかのアプリが前にある）ときにファイルの行を押したら、前に出すのを待つ
+  /// 後ろにある（ほかのアプリが前にある）ときに CapsLock 中にファイルの行を押したら、前に出すのを待つ
   /// （最初のクリックを受け取るのは [acceptsFirstMouse]）。ドラッグせずに離したら、いつもどおり前に出る。
   override func shouldDelayWindowOrdering(for event: NSEvent) -> Bool {
     // 前にあるときにも呼ばれることがあるので、本当に後ろにある（アプリが前にないか、窓が選ばれていない）ときだけにする。
     let behind = !NSApp.isActive || !(window?.isKeyWindow ?? false)
-    clickedBehind = behind && filesToDrag(event, fromBehind: true) != nil
+    clickedBehind = behind && filesToDrag(event) != nil
     return clickedBehind
   }
 
@@ -972,7 +988,8 @@ final class GridView: NSView, NSTextInputClient {
   }
 
   /// 文字以外のキーと Ctrl+キーを、端末と同じバイト列にする。文字のキーは nil（日本語入力を通す）。
-  /// [shiftedMoves] なら、Shift+矢印・Home・End を xterm と同じ修飾キーつきの形（ESC [1;2D など）にする。
+  /// [shiftedMoves] なら、Shift+矢印・Home・End を xterm と同じ修飾キーつきの形（ESC [1;2D など）に、
+  /// Shift+Enter を ESC [13;2u にする。
   private static func encode(_ event: NSEvent, shiftedMoves: Bool) -> [UInt8]? {
     let flags = event.modifierFlags
     if let special = specialKeys[event.keyCode] {
@@ -981,6 +998,10 @@ final class GridView: NSView, NSTextInputClient {
       }
       if shiftedMoves && flags.contains(.shift), let final = shiftedMoveKeys[event.keyCode] {
         return Array("\u{1b}[1;2\(final)".utf8)
+      }
+      // Shift+Enter（Shell の入力欄のブックマークして実行など）も、アプリの画面にだけ区別して送る（CSI u の形）。
+      if shiftedMoves && flags.contains(.shift) && (event.keyCode == 36 || event.keyCode == 76) {
+        return Array("\u{1b}[13;2u".utf8)
       }
       return Array(special.utf8)
     }
