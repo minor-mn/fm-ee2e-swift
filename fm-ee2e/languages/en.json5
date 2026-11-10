@@ -287,6 +287,8 @@
       execute: "Execute",
     },
     progress_title: "Please wait",
+    aborted: "Aborted.",
+    aborting: "Aborting…",
     error_title: "Error",
     yes: "Yes",
   },

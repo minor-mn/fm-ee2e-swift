@@ -333,7 +333,7 @@ private nonisolated func readTextFile(_ path: String) -> Data? {
 }
 
 /// テキストかを見る、ファイルの先頭の大きさ。
-private let textProbe = 1024
+nonisolated private let textProbe = 1024
 
 /// [head] が NUL を含まない UTF-8 か。[truncated] なら、末尾で途切れた1文字（3バイトまで）は不問にする。
 nonisolated func looksLikeText(_ head: Data, truncated: Bool) -> Bool {
@@ -577,7 +577,7 @@ class FindCommand: Command {
       ignored: Set(words(input.ignored))
     )
     do {
-      let items = try await c.app.withCancellableProgress(tr("find.searching"), cancellable: true) { _ in
+      let items = try await c.app.withUpdatingProgress(tr("find.searching")) { _ in
         try await self.search(c, query)
       }
       if items.isEmpty {

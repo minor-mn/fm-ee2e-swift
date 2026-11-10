@@ -176,7 +176,7 @@ final class DrivePane: PathPane {
     var cancelled = false
     if !toEvict.isEmpty {
       let message = tr("drive_pane.uploading")
-      await app.withUpdatingProgress(message, onEscape: { cancelled = true }) { update in
+      try? await app.withUpdatingProgress(message, onEscape: { cancelled = true }) { update in
         while !cancelled {
           // 上がり終えたものは手元から外せるので、外せなくなるまで（残りがなくなるまで）待つ。
           await evictPending()

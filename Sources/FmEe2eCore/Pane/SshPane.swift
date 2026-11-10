@@ -430,7 +430,17 @@ class SshPane: PathPane {
       controlPath = p.join(socketDir!, "master")
     }
     let next = Ssh(host, controlPath, via: via)
-    let quiet = await app.withProgress(tr("ssh_pane.connecting")) { (try? await next.connectWithoutPrompt()) ?? false }
+    let quiet: Bool
+    do {
+      quiet = try await app.withProgress(tr("ssh_pane.connecting")) { try await next.connectWithoutPrompt() }
+    } catch is CancellationError {
+      // Esc で中止した。認証を聞く端末には進まない。
+      await close(next)
+      await load(focus: host)
+      throw CancellationError()
+    } catch {
+      quiet = false
+    }
     let code = quiet ? 0 : try await connectInTerminal(next)
     if code != 0 {
       await close(next)

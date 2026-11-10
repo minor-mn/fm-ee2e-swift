@@ -12,9 +12,6 @@ class CompressCommand: Command {
   /// 圧縮先のフォルダー（小窓に出す）。
   func place(_ c: CommandContext) -> String { fatalError("place") }
 
-  /// Esc で止められる。接続先で動かすものは、手元の ssh を止めても接続先のコマンドが動き続けることがあるので止めない。
-  var cancellable: Bool { false }
-
   /// 圧縮先のフォルダーにある名前。
   func existing(_ c: CommandContext) async throws -> Set<String> { fatalError("existing") }
 
@@ -55,7 +52,7 @@ class CompressCommand: Command {
         return
       }
       do {
-        try await app.withCancellableProgress(tr("archive_command.compressing"), cancellable: cancellable) { update in
+        try await app.withUpdatingProgress(tr("archive_command.compressing")) { update in
           try await self.compress(c, targets, name, format) { done, total, item in
             update(tr("archive_command.compressing_count", ["done": done, "total": total, "name": item]))
           }
@@ -76,8 +73,6 @@ class CompressCommand: Command {
 
 /// ローカルのフォルダーに、この Mac の tar で圧縮する。形式はどれも使える。
 final class LocalCompress: CompressCommand {
-  override var cancellable: Bool { true }
-
   override func formats(_ c: CommandContext) async throws -> [ArchiveFormat] { ArchiveFormat.allCases }
 
   override func place(_ c: CommandContext) -> String { (c.pane as! LocalPane).dir }
@@ -127,9 +122,6 @@ class ExtractCommand: Command {
   /// 展開先のフォルダー（小窓に出す）。
   func place(_ c: CommandContext) -> String { fatalError("place") }
 
-  /// Esc で止められる（[CompressCommand.cancellable] と同じ）。
-  var cancellable: Bool { false }
-
   /// 展開先のフォルダーにある名前。
   func existing(_ c: CommandContext) async throws -> Set<String> { fatalError("existing") }
 
@@ -174,7 +166,7 @@ class ExtractCommand: Command {
         }
         keepExisting = choice == 1
       }
-      try await app.withCancellableProgress(tr("archive_command.extracting", ["name": entry.name]), cancellable: cancellable) { update in
+      try await app.withUpdatingProgress(tr("archive_command.extracting", ["name": entry.name])) { update in
         try await archive.extractAll(keepExisting) { done, total, item in
           update(tr("archive_command.extracting_count", ["archive": entry.name, "done": done, "total": total, "name": item]))
         }
@@ -190,8 +182,6 @@ class ExtractCommand: Command {
 
 /// ローカルの圧縮ファイルを、この Mac の tar で展開する。
 final class LocalExtract: ExtractCommand {
-  override var cancellable: Bool { true }
-
   override func place(_ c: CommandContext) -> String { (c.pane as! LocalPane).dir }
 
   override func existing(_ c: CommandContext) async throws -> Set<String> { try await dirNames((c.pane as! LocalPane).dir) }

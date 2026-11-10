@@ -23,6 +23,23 @@ final class GitCommand: Command {
   }
 }
 
+/// Git のタブで L。紐付け先のリモートがあれば git fetch してから、git status を読み直す。
+final class GitReload: Command {
+  override var needsReady: Bool { false }
+
+  override func run(_ c: CommandContext) async {
+    let pane = c.pane as! GitPane
+    if let root = pane.root, pane.ready {
+      do {
+        _ = try await GitActions(c).fetch(pane, root)
+      } catch {
+        await c.app.showError(error)
+      }
+    }
+    await pane.reload()
+  }
+}
+
 /// Git のタブで Enter。カーソルの行がリモート・push 先・ブランチならそれを選び、ファイルならその差分を出す。
 final class GitEnter: EnterCommand {
   override func run(_ c: CommandContext) async {
@@ -102,6 +119,21 @@ private final class GitActions {
     // git status の読み直しは、_run が終わったときに行う。
   }
 
+  /// 紐付け先のリモートがあれば git fetch して、成功したら true。リモートがなければ何もせず false。
+  /// 画面は切り替えず、裏で実行する。失敗したらエラーを出して false。
+  func fetch(_ pane: GitPane, _ root: String) async throws -> Bool {
+    guard let remote = pane.remote, !remote.hasPrefix("(") else {
+      return false
+    }
+    app.showStatus("$ git fetch \(remote)")
+    let result = try await pane.git.run(root, ["fetch", remote])
+    if result.exitCode != 0 {
+      await app.showError(pane.git.failure(["fetch", remote], result))
+      return false
+    }
+    return true
+  }
+
   /// ブランチの一覧から選んで切り替える。紐付け先のリモートがあれば、先に git fetch して、リモートにだけあるブランチも並べる。
   /// 一番上の「新しいブランチを作る」で、名前を聞いて今の場所から作って切り替える。
   func chooseBranch(_ pane: GitPane) async throws {
@@ -111,20 +143,8 @@ private final class GitActions {
     let current = pane.branch
     let remote = pane.remote
     let git = pane.git
-    var fetched = false
-    if let remote, !remote.hasPrefix("(") {
-      // push と同じく枠の中の端末で動かす（認証を聞かれても答えられる）。うまくいけばすぐ戻り、失敗したときだけ Enter を待つ。
-      // 失敗したら、手元のブランチだけを出す。
-      let (program, args) = try git.commandLine(["-C", root, "fetch", remote], tty: true)
-      let code = await runInTerminal(
-        app,
-        "\(git.placeOf(root)) $ git fetch \(remote)",
-        program,
-        args,
-        waitAfterExit: { code in code != 0 }
-      )
-      fetched = code == 0
-    }
+    // 失敗したら、手元のブランチだけを出す。
+    let fetched = try await fetch(pane, root)
     let branches = try await git.localBranches(root)
     // リモートにだけあるブランチ（手元に同じ名前がないもの）。
     var remoteOnly: [String] = []
@@ -607,7 +627,7 @@ private final class GitActions {
   /// git の [args]（push・pull など）を、枠の中の端末で実行する（パスワードや SSH のパスフレーズを聞かれたり、エディタが開いたりしても操作できるように）。
   /// 終わったら Enter で戻る。
   private func gitInTerminal(_ git: Git, _ root: String, _ args: [String]) async throws {
-    let (program, argv) = try git.commandLine(["-C", root] + args, tty: true)
+    let (program, argv) = try git.commandLine(in: root, args, tty: true)
     await runInTerminal(app, "\(git.placeOf(root)) $ \((["git"] + args).joined(separator: " "))", program, argv)
   }
 }

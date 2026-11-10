@@ -50,6 +50,7 @@ final class LocalDelete: DeleteCommand {
   override func remove(_ c: CommandContext, _ targets: [Mark]) async throws {
     let pane = c.pane as! LocalPane
     for mark in targets {
+      try Task.checkCancellation()
       try await moveToTrash(pane.pathOfMark(mark))
     }
   }

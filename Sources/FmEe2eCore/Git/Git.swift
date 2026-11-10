@@ -2,8 +2,9 @@ import Darwin
 import Foundation
 
 /// git コマンド。この Mac の git（[locate]）か、SSH の接続先の git（[overSsh]）を実行する。
-final class Git {
-  private init(_ executable: String, ssh: Ssh? = nil) {
+/// git 2.31 より古い git では、使えるオプションが違うので [LegacyGit] を使う。
+class Git {
+  init(_ executable: String, ssh: Ssh? = nil) {
     self.executable = executable
     self.ssh = ssh
   }
@@ -34,15 +35,28 @@ final class Git {
           continue
         }
       }
-      return Git(path)
+      let version = try await runProcess(path, ["--version"])
+      // 古すぎる git は、ないものとして PATH の続きを探す。
+      if let git = make(Git.decode(version.stdoutData), path) {
+        return git
+      }
     }
     return nil
   }
 
-  /// [ssh] の接続先の git。接続先の sh の PATH に git がなければ nil。
+  /// [ssh] の接続先の git。接続先の sh の PATH に git がないか、古すぎれば nil。
   static func overSsh(_ ssh: Ssh) async throws -> Git? {
-    let found = String(decoding: try await ssh.run("command -v git || true"), as: UTF8.self)
-    return trim(found).isEmpty ? nil : Git("git", ssh: ssh)
+    let version = String(decoding: try await ssh.run("git --version 2>/dev/null || true"), as: UTF8.self)
+    return trim(version).isEmpty ? nil : make(version, "git", ssh: ssh)
+  }
+
+  /// git --version の出力 [version] で、1.7.0 より古ければ nil（使えない。ないものと同じに扱う）、
+  /// 2.31 より古ければ [LegacyGit]、でなければ [Git]。
+  private static func make(_ version: String, _ executable: String, ssh: Ssh? = nil) -> Git? {
+    if isUnsupportedVersion(version) {
+      return nil
+    }
+    return isLegacyVersion(version) ? LegacyGit(executable, ssh: ssh) : Git(executable, ssh: ssh)
   }
 
   /// git を [args] で実行するプログラムと引数。[tty] なら、接続先の git には端末を割り当てる（認証を聞かれても答えられるように）。
@@ -54,6 +68,32 @@ final class Git {
     return (executable, args)
   }
 
+  /// [dir] で git を [args] で実行するプログラムと引数（git -C）。
+  func commandLine(in dir: String, _ args: [String], tty: Bool = false) throws -> (String, [String]) {
+    try commandLine(["-C", dir] + args, tty: tty)
+  }
+
+  /// パスの「*」などをワイルドカードとして扱わないオプション。
+  var literalPathspecs: [String] { ["--literal-pathspecs"] }
+
+  /// 日本語などの名前を「\343...」のようにしないオプション。
+  var rawPathNames: [String] { ["-c", "core.quotepath=false"] }
+
+  /// 日時を「2026-10-28 03:05」の形（先頭16文字）で出すオプション。
+  var dateOption: String { "--date=format:%Y-%m-%d %H:%M" }
+
+  /// git log -z --format=… の書式の末尾に足すもの（古い git は -z でも、書式のあとを NUL ではなく改行で区切る）。
+  var recordEnd: String { "" }
+
+  /// git show でコミットの見出しを出さないオプション。
+  var noHeader: String { "--format=" }
+
+  /// git show で、マージのコミットを1つ目の親との差で出すオプション。
+  var firstParentDiff: [String] { ["--diff-merges=first-parent"] }
+
+  /// git log --follow で、マージのコミットを1つ目の親との差で見るオプション。
+  var followFirstParent: [String] { ["--diff-merges=first-parent"] }
+
   /// 見出しなどに出す [root] の場所。接続先なら「host:パス」。
   func placeOf(_ root: String) -> String {
     if let remote = ssh {
@@ -62,26 +102,24 @@ final class Git {
     return root
   }
 
-  private func exec(_ args: [String]) async throws -> ProcResult {
-    let (program, argv) = try commandLine(args)
+  func run(_ dir: String, _ args: [String]) async throws -> ProcResult {
+    let (program, argv) = try commandLine(in: dir, args)
     return try await runProcess(program, argv)
   }
 
-  private func run(_ dir: String, _ args: [String]) async throws -> ProcResult { try await exec(["-C", dir] + args) }
-
-  /// [exec] と同じく実行し、[input] を標準入力に渡す。
-  private func execInput(_ args: [String], _ input: Data) async throws -> ProcResult {
-    let (program, argv) = try commandLine(args)
+  /// [run] と同じく実行し、[input] を標準入力に渡す。
+  private func runInput(_ dir: String, _ args: [String], _ input: Data) async throws -> ProcResult {
+    let (program, argv) = try commandLine(in: dir, args)
     return try await runProcess(program, argv, input: input)
   }
 
   /// 失敗した git の [ProcessError]。メッセージは標準エラー出力。
-  private func failure(_ args: [String], _ result: ProcResult) -> ProcessError {
+  func failure(_ args: [String], _ result: ProcResult) -> ProcessError {
     ProcessError(executable, args, trim(result.stderr), result.exitCode)
   }
 
   /// [run] して、失敗したら [ProcessError]。成功したら標準出力。
-  private func output(_ dir: String, _ args: [String]) async throws -> String {
+  func output(_ dir: String, _ args: [String]) async throws -> String {
     let result = try await run(dir, args)
     if result.exitCode != 0 {
       throw failure(Array(args.prefix(2)), result)
@@ -94,7 +132,7 @@ final class Git {
   /// （git status --porcelain のパスは、サブフォルダーで実行しても一番上からのパス）。
   func statusAt(_ dir: String) async throws -> (String, GitStatus)? {
     async let topRun = run(dir, ["rev-parse", "--show-toplevel"])
-    async let statusRun = run(dir, ["status", "--porcelain=v1", "-z", "--branch"])
+    async let statusRun = status(dir)
     async let configRun = run(dir, ["config", "-l", "-z"])
     let (top, status, config) = try await (topRun, statusRun, configRun)
     if top.exitCode != 0 {
@@ -118,6 +156,9 @@ final class Git {
       )
     )
   }
+
+  /// git status --porcelain -z --branch の結果（先頭に「## ブランチ名...」の項目）。
+  func status(_ dir: String) async throws -> ProcResult { try await run(dir, ["status", "--porcelain", "-z", "--branch"]) }
 
   /// 登録されているリモートの名前（git remote）。
   func remotes(_ root: String) async throws -> [String] {
@@ -155,7 +196,7 @@ final class Git {
   }
 
   /// 設定を消す。もともと設定がなくても失敗にしない。
-  private func unsetConfig(_ root: String, _ key: String) async throws {
+  func unsetConfig(_ root: String, _ key: String) async throws {
     let result = try await run(root, ["config", "--unset", key])
     // 5 は「もともと設定がない」。
     if result.exitCode != 0 && result.exitCode != 5 {
@@ -163,7 +204,7 @@ final class Git {
     }
   }
 
-  private func config(_ root: String, _ args: [String]) async throws {
+  func config(_ root: String, _ args: [String]) async throws {
     let result = try await run(root, ["config"] + args)
     if result.exitCode != 0 {
       throw failure(["config"], result)
@@ -185,7 +226,7 @@ final class Git {
   /// フォルダーは、中のファイルのどれかがその状態なら、その状態とする。リポジトリの外のパスは、どの状態でもない。
   func pathStates(_ dir: String, _ paths: [String]) async throws -> [String: GitPathState] {
     func output(_ args: [String]) async throws -> String {
-      let result = try await exec(["--literal-pathspecs", "-C", dir] + args)
+      let result = try await run(dir, literalPathspecs + args)
       if result.exitCode != 0 {
         throw failure(Array(args.prefix(1)), result)
       }
@@ -194,7 +235,7 @@ final class Git {
 
     // git status・ls-files のパスはリポジトリの一番上から。[dir] のその中での場所（末尾は「/」）を前に付けて揃える。
     let prefix = trim(try await output(["rev-parse", "--show-prefix"]))
-    let status = parsePathStatus(try await output(["status", "--porcelain=v1", "-z", "--"] + paths))
+    let status = parsePathStatus(try await output(["status", "--porcelain", "-z", "--"] + paths))
     let tracked = splitOn(try await output(["ls-files", "-z", "--"] + paths), "\0").filter { !$0.isEmpty }
     var states: [String: GitPathState] = [:]
     for path in paths {
@@ -217,18 +258,9 @@ final class Git {
 
   /// [root] のリポジトリの [paths] の差分。[staged] なら add した変更（git diff --cached）、でなければ add していない変更。
   func diff(_ root: String, _ paths: [String], staged: Bool) async throws -> [DiffFile] {
-    let result = try await exec(
-      [
-        "--literal-pathspecs",
-        "-C",
-        root,
-        // 日本語などの名前を「\343...」のようにしない。
-        "-c",
-        "core.quotepath=false",
-        "diff",
-        "--no-color",
-        "--no-ext-diff",
-      ] + (staged ? ["--cached"] : []) + ["--"] + paths
+    let result = try await run(
+      root,
+      literalPathspecs + rawPathNames + ["diff", "--no-color", "--no-ext-diff"] + (staged ? ["--cached"] : []) + ["--"] + paths
     )
     if result.exitCode != 0 {
       throw failure(["diff"], result)
@@ -239,9 +271,7 @@ final class Git {
   /// [root] のリポジトリの、まだ git に登録していない（untracked）[paths] の中身を、全行を追加した差分として返す。
   /// フォルダーは、中の untracked のファイル（.gitignore で除くものを除く）ごとに分ける。
   func diffUntracked(_ root: String, _ paths: [String]) async throws -> [DiffFile] {
-    let listed = try await exec(
-      ["--literal-pathspecs", "-C", root, "ls-files", "--others", "--exclude-standard", "-z", "--"] + paths
-    )
+    let listed = try await run(root, literalPathspecs + ["ls-files", "--others", "--exclude-standard", "-z", "--"] + paths)
     if listed.exitCode != 0 {
       throw failure(["ls-files"], listed)
     }
@@ -249,19 +279,7 @@ final class Git {
     var result: [DiffFile] = []
     for file in files {
       // 空のファイルと比べる。違いがあると終了コードは 1 になる（失敗ではない）。
-      let diff = try await exec([
-        "-C",
-        root,
-        "-c",
-        "core.quotepath=false",
-        "diff",
-        "--no-index",
-        "--no-color",
-        "--no-ext-diff",
-        "--",
-        "/dev/null",
-        file,
-      ])
+      let diff = try await run(root, rawPathNames + ["diff", "--no-index", "--no-color", "--no-ext-diff", "--", "/dev/null", file])
       if diff.exitCode > 1 {
         throw failure(["diff"], diff)
       }
@@ -273,7 +291,7 @@ final class Git {
 
   /// [root] のリポジトリで、add した変更を [message] でコミットする。メッセージは標準入力で渡す（記号や改行をそのまま扱う）。
   func commit(_ root: String, _ message: String) async throws {
-    let (program, argv) = try commandLine(["-C", root, "commit", "--file=-"])
+    let (program, argv) = try commandLine(in: root, ["commit", "--file=-"])
     let result = try await runProcess(program, argv, input: Data(message.utf8))
     if result.exitCode != 0 {
       // 「コミットするものがない」などは標準出力に出るので、両方を見せる。
@@ -349,8 +367,8 @@ final class Git {
       "-z",
       "-n",
       "\(limit)",
-      "--date=format:%Y-%m-%d %H:%M",
-      "--format=%H%x1f%h%x1f%ad%x1f%an%x1f%s",
+      dateOption,
+      "--format=%H%x1f%h%x1f%ad%x1f%an%x1f%s\(recordEnd)",
     ])
     if result.exitCode != 0 {
       // まだコミットがないブランチ。
@@ -364,8 +382,8 @@ final class Git {
     let result = try await run(root, [
       "log",
       "-z",
-      "--date=format:%Y-%m-%d %H:%M",
-      "--format=%H%x1f%h%x1f%ad%x1f%an%x1f%s",
+      dateOption,
+      "--format=%H%x1f%h%x1f%ad%x1f%an%x1f%s\(recordEnd)",
       "\(oldest)..\(newest)",
     ])
     if result.exitCode != 0 {
@@ -396,22 +414,17 @@ final class Git {
   /// [path]（[dir] からの相対パス）が変わったコミット（新しい順に [limit] 件まで）。名前の変更もたどる。
   /// マージのコミットは、1つ目の親との差で見る。
   func fileLog(_ dir: String, _ path: String, limit: Int = 1000) async throws -> [FileCommit] {
-    let result = try await exec([
-      "--literal-pathspecs",
-      "-C",
+    let result = try await run(
       dir,
-      "log",
-      "--follow",
-      "-z",
-      "--name-status",
-      "--diff-merges=first-parent",
-      "-n",
-      "\(limit)",
-      "--date=format:%Y-%m-%d %H:%M",
-      "--format=%x1e%H%x1f%h%x1f%ad%x1f%an%x1f%s",
-      "--",
-      path,
-    ])
+      literalPathspecs + ["log", "--follow", "-z", "--name-status"] + followFirstParent + [
+        "-n",
+        "\(limit)",
+        dateOption,
+        "--format=%x1e%H%x1f%h%x1f%ad%x1f%an%x1f%s\(recordEnd)",
+        "--",
+        path,
+      ]
+    )
     if result.exitCode != 0 {
       // まだコミットがないブランチ。
       return []
@@ -421,22 +434,10 @@ final class Git {
 
   /// コミット [hash] での [file] の差分。名前の変更は、元と新しいパスの両方を渡して、名前の変更として出す。
   func fileDiff(_ root: String, _ hash: String, _ file: CommitFile) async throws -> [DiffFile] {
-    let result = try await exec(
-      [
-        "--literal-pathspecs",
-        "-C",
-        root,
-        "-c",
-        "core.quotepath=false",
-        "show",
-        "--no-color",
-        "--no-ext-diff",
-        "--format=",
-        "--diff-merges=first-parent",
-        "-M",
-        hash,
-        "--",
-      ] + (file.from.map { [$0] } ?? []) + [file.path]
+    let result = try await run(
+      root,
+      literalPathspecs + rawPathNames + ["show", "--no-color", "--no-ext-diff", noHeader] + firstParentDiff + ["-M", hash, "--"]
+        + (file.from.map { [$0] } ?? []) + [file.path]
     )
     if result.exitCode != 0 {
       throw failure(["show"], result)
@@ -450,7 +451,7 @@ final class Git {
     if parent.exitCode == 0 {
       return trim(Git.decode(parent.stdoutData))
     }
-    let empty = try await execInput(["-C", root, "hash-object", "-t", "tree", "--stdin"], Data())
+    let empty = try await runInput(root, ["hash-object", "-t", "tree", "--stdin"], Data())
     return trim(Git.decode(empty.stdoutData))
   }
 
@@ -464,20 +465,9 @@ final class Git {
   /// 名前の変更は、元と新しいパスの両方を [paths] に渡すと、名前の変更として出る。
   func rangeDiff(_ root: String, _ oldest: String, _ newest: String, paths: [String] = []) async throws -> [DiffFile] {
     let base = try await rangeBase(root, oldest)
-    let result = try await exec(
-      [
-        "--literal-pathspecs",
-        "-C",
-        root,
-        "-c",
-        "core.quotepath=false",
-        "diff",
-        "--no-color",
-        "--no-ext-diff",
-        "-M",
-        base,
-        newest,
-      ] + (paths.isEmpty ? [] : ["--"] + paths)
+    let result = try await run(
+      root,
+      literalPathspecs + rawPathNames + ["diff", "--no-color", "--no-ext-diff", "-M", base, newest] + (paths.isEmpty ? [] : ["--"] + paths)
     )
     if result.exitCode != 0 {
       throw failure(["diff"], result)
@@ -490,14 +480,13 @@ final class Git {
   func prepareAuthorRewrite(_ root: String, _ hash: String) async throws -> AuthorRewrite {
     async let headRun = output(root, ["rev-parse", "--verify", "HEAD"])
     async let refRun = run(root, ["symbolic-ref", "-q", "HEAD"])
-    async let afterRun = output(root, ["rev-list", "--ancestry-path", "--topo-order", "--reverse", "\(hash)..HEAD"])
+    async let afterRun = descendants(root, hash)
     let (head, ref, after) = try await (headRun, refRun, afterRun)
-    let ancestor = try await run(root, ["merge-base", "--is-ancestor", hash, "HEAD"])
-    if ancestor.exitCode != 0 {
+    if !(try await isAncestor(root, hash)) {
       throw GitException(tr("git.rewrite.not_in_history"))
     }
-    let hashes = [hash] + splitOn(after, "\n").map(trim).filter { !$0.isEmpty }
-    let read = try await execInput(["-C", root, "cat-file", "--batch"], Data((hashes.joined(separator: "\n") + "\n").utf8))
+    let hashes = [hash] + after
+    let read = try await runInput(root, ["cat-file", "--batch"], Data((hashes.joined(separator: "\n") + "\n").utf8))
     if read.exitCode != 0 {
       throw failure(["cat-file"], read)
     }
@@ -513,13 +502,24 @@ final class Git {
     )
   }
 
+  /// [hash] から HEAD までの間で、[hash] の子孫のコミット（親から順。[hash] は含めない）。
+  func descendants(_ root: String, _ hash: String) async throws -> [String] {
+    let after = try await output(root, ["rev-list", "--ancestry-path", "--topo-order", "--reverse", "\(hash)..HEAD"])
+    return splitOn(after, "\n").map(trim).filter { !$0.isEmpty }
+  }
+
+  /// コミット [hash] が今の位置（HEAD）の履歴にあるか。
+  func isAncestor(_ root: String, _ hash: String) async throws -> Bool {
+    try await run(root, ["merge-base", "--is-ancestor", hash, "HEAD"]).exitCode == 0
+  }
+
   /// [rewrite] のコミットの作者を [name]・[email] に、メッセージを [message]（nil なら元のまま）にして作り直し、
   /// そのあとのコミットも親を付け替えて作り直して、今のブランチ（ブランチにいなければ HEAD）を付け替える。
   /// 中身（ツリー）とコミッターは変えないので、作業ツリーと index はそのまま。
   func rewriteAuthor(_ root: String, _ rewrite: AuthorRewrite, name: String, email: String, message: String? = nil) async throws {
     var renamed: [String: String] = [:]
     func write(_ commit: RawCommit, _ text: [UInt8]) async throws {
-      let result = try await execInput(["-C", root, "hash-object", "-t", "commit", "-w", "--stdin"], Data(text))
+      let result = try await runInput(root, ["hash-object", "-t", "commit", "-w", "--stdin"], Data(text))
       if result.exitCode != 0 {
         throw failure(["hash-object"], result)
       }
@@ -545,7 +545,7 @@ final class Git {
 
   /// コミット [hash] で変わったファイル（git show --name-status）。マージのコミットは、1つ目の親との差。
   func commitFiles(_ root: String, _ hash: String) async throws -> [CommitFile] {
-    let result = try await run(root, ["show", "-z", "--name-status", "--format=", "--diff-merges=first-parent", hash])
+    let result = try await run(root, ["show", "-z", "--name-status", noHeader] + firstParentDiff + [hash])
     if result.exitCode != 0 {
       throw failure(["show"], result)
     }
@@ -554,16 +554,7 @@ final class Git {
 
   /// コミット [hash] の差分（ファイルごと）。マージのコミットは、1つ目の親との差。
   func commitDiff(_ root: String, _ hash: String) async throws -> [DiffFile] {
-    let result = try await run(root, [
-      "-c",
-      "core.quotepath=false",
-      "show",
-      "--no-color",
-      "--no-ext-diff",
-      "--format=",
-      "--diff-merges=first-parent",
-      hash,
-    ])
+    let result = try await run(root, rawPathNames + ["show", "--no-color", "--no-ext-diff", noHeader] + firstParentDiff + [hash])
     if result.exitCode != 0 {
       throw failure(["show"], result)
     }
@@ -571,14 +562,14 @@ final class Git {
   }
 
   /// インデックスを変える git コマンド。パスの「*」などをワイルドカードとして扱わないよう、--literal-pathspecs を付ける。
-  private func change(_ root: String, _ args: [String]) async throws {
-    let result = try await exec(["--literal-pathspecs", "-C", root] + args)
+  func change(_ root: String, _ args: [String]) async throws {
+    let result = try await run(root, literalPathspecs + args)
     if result.exitCode != 0 {
       throw failure(Array(args.prefix(2)), result)
     }
   }
 
-  private static func decode(_ bytes: Data) -> String { String(decoding: bytes, as: UTF8.self) }
+  static func decode(_ bytes: Data) -> String { String(decoding: bytes, as: UTF8.self) }
 }
 
 /// git status の結果。
@@ -1076,7 +1067,7 @@ func parseGitDiff(_ output: String) -> [DiffFile] {
       path = slice(path, 0, path.utf8.count - 1)
     }
     if path.utf8.count >= 2 && starts(path, "\"") && ends(path, "\"") {
-      path = slice(path, 1, path.utf8.count - 1)
+      path = unquoteGitPath(slice(path, 1, path.utf8.count - 1))
     }
     return starts(path, prefix) ? slice(path, prefix.utf8.count) : path
   }
@@ -1127,14 +1118,53 @@ func parseGitDiff(_ output: String) -> [DiffFile] {
       // 消したファイルは「+++ /dev/null」なので、元のパスを名前にしておく（+++ があれば上書きされる）。
       current.path = strip(slice(line, 4), "a/")
     } else if starts(line, "rename from ") {
-      current.from = slice(line, "rename from ".utf8.count)
+      current.from = unquoted(slice(line, "rename from ".utf8.count))
     } else if starts(line, "rename to ") {
-      current.path = slice(line, "rename to ".utf8.count)
+      current.path = unquoted(slice(line, "rename to ".utf8.count))
     } else if starts(line, "Binary files ") {
       current.binary = true
     }
   }
   return files
+}
+
+/// git が「"...」で囲んでいれば外して、中の「\343」などを戻す。
+private func unquoted(_ path: String) -> String {
+  path.utf8.count >= 2 && starts(path, "\"") && ends(path, "\"") ? unquoteGitPath(slice(path, 1, path.utf8.count - 1)) : path
+}
+
+/// git が囲んだ名前の中身の「\343」（8進のバイト）・「\t」「\n」「\"」「\\」などを戻す
+/// （core.quotepath=false を付けられない古い git は、日本語などの名前をこの形で出す）。
+func unquoteGitPath(_ s: String) -> String {
+  let escapes: [UInt8: UInt8] = [
+    UInt8(ascii: "a"): 7,
+    UInt8(ascii: "b"): 8,
+    UInt8(ascii: "t"): 9,
+    UInt8(ascii: "n"): 10,
+    UInt8(ascii: "v"): 11,
+    UInt8(ascii: "f"): 12,
+    UInt8(ascii: "r"): 13,
+  ]
+  let bytes = Array(s.utf8)
+  var out: [UInt8] = []
+  var i = 0
+  func octal(_ b: UInt8) -> Bool { b >= UInt8(ascii: "0") && b <= UInt8(ascii: "7") }
+  while i < bytes.count {
+    guard bytes[i] == UInt8(ascii: "\\"), i + 1 < bytes.count else {
+      out.append(bytes[i])
+      i += 1
+      continue
+    }
+    let next = bytes[i + 1]
+    if i + 3 < bytes.count, octal(next), octal(bytes[i + 2]), octal(bytes[i + 3]) {
+      out.append((next - 48) << 6 | (bytes[i + 2] - 48) << 3 | (bytes[i + 3] - 48))
+      i += 4
+    } else {
+      out.append(escapes[next] ?? next)
+      i += 2
+    }
+  }
+  return String(decoding: out, as: UTF8.self)
 }
 
 /// コミットの履歴の1件。
@@ -1178,7 +1208,8 @@ func parseGitLog(_ output: String) -> [GitCommit] {
   splitOn(output, "\0").compactMap { record in
     let fields = splitOn(record, "\u{1f}")
     guard fields.count == 5 else { return nil }
-    return GitCommit(trim(fields[0]), fields[1], fields[2], fields[3], fields[4])
+    // 日時は先頭の「2026-10-28 03:05」まで（古い git の --date=iso は秒とタイムゾーンが続く）。
+    return GitCommit(trim(fields[0]), fields[1], String(fields[2].prefix(16)), fields[3], fields[4])
   }
 }
 

@@ -732,8 +732,10 @@ final class ContainerPane: SshPane {
           if !imageJobs.isEmpty { sections.append(tr("container.bulk_delete_images_confirm") + "\n\n" + imageJobs.map(\.image).joined(separator: "\n")) }
           guard await app.confirm(tr("container.\(action)"), sections.joined(separator: "\n\n"), yes: tr("container.\(action)")) else { return }
         }
-        await app.withProgress(tr("container.progress_action")) {
+        // Esc で中止したら、残りは実行しない（止めたコマンドの失敗も知らせない）。
+        try await app.withProgress(tr("container.progress_action")) {
           for (mark, target) in jobs {
+            if Task.isCancelled { break }
             do {
               if action == "start" {
                 let ports = existing.first { $0.name == target.name }?.details.ports ?? []
@@ -742,16 +744,19 @@ final class ContainerPane: SshPane {
               }
               try await client.checked([action, target.name])
               marks.removeValue(forKey: keyOf(mark.entry))
-            } catch { errors.append("\(target.name): \(errorMessage(error))") }
+            } catch { if !Task.isCancelled { errors.append("\(target.name): \(errorMessage(error))") } }
           }
           for (imageMarks, image) in imageJobs {
+            if Task.isCancelled { break }
             do {
               try await client.checked(["image", "rm", image])
               for mark in imageMarks { marks.removeValue(forKey: keyOf(mark.entry)) }
-            } catch { errors.append("\(image): \(errorMessage(error))") }
+            } catch { if !Task.isCancelled { errors.append("\(image): \(errorMessage(error))") } }
           }
         }
       }
+    } catch is CancellationError {
+      app.showStatus(tr("dialogs.aborted"))
     } catch { errors.append(errorMessage(error)) }
     await load()
     if !errors.isEmpty { await app.showError(errors.joined(separator: "\n")) }

@@ -341,8 +341,8 @@ final class ContainerConnection: Ssh {
 
   /// 接続先の git も、container exec の sh で動かす。標準入力はいつも渡す（git apply などに入力を渡すため）。
   /// [tty] なら端末も割り当てる（認証を聞かれても答えられるように）。
-  override func gitArgs(_ args: [String], tty: Bool = false) throws -> [String] {
-    execArgs("exec git \(args.map(shQuote).joined(separator: " "))", interactive: true, tty: tty)
+  override func gitArgs(_ args: [String], dir: String? = nil, tty: Bool = false) throws -> [String] {
+    execArgs(gitScript(args, dir: dir), interactive: true, tty: tty)
   }
 
   override func alive() async throws -> Bool { try await client.list().contains { $0.name == host && $0.running } }

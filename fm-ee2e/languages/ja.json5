@@ -287,6 +287,8 @@
       execute: "実行",
     },
     progress_title: "お待ちください",
+    aborted: "中止しました。",
+    aborting: "中止しています…",
     error_title: "エラー",
     yes: "はい",
   },

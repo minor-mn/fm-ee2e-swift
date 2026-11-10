@@ -912,7 +912,7 @@ final class ProgressDialog: Modal {
   }
 
   /// Esc を押したとき（中断）。nil なら Esc は効かない。
-  let onEscape: (() -> Void)?
+  var onEscape: (() -> Void)?
 
   /// 出している文言。処理の途中で変えてよい（[withProgress] の update）。
   var message: String
@@ -948,6 +948,11 @@ extension App {
 
   /// エラーを出す。文言（String）でも Error でもよい。
   func showError(_ error: Any) async {
+    // Esc で中止したときは、エラーにしない。
+    if error is CancellationError {
+      showStatus(tr("dialogs.aborted"))
+      return
+    }
     let message = (error as? any Error).map(errorMessage) ?? "\(error)"
     await showModal { (close: @escaping (()) -> Void) in MessageDialog(tr("dialogs.error_title"), message, close, accent: Palette.error) }
   }
@@ -1034,36 +1039,20 @@ extension App {
   }
 
   /// [action] の間「処理中」を表示する。途中で別のダイアログ（同名確認など）を重ねてよい。
-  func withProgress<T>(_ message: String, _ action: () async throws -> T) async rethrows -> T {
+  /// Esc で [action] を取り消して [CancellationError] を投げる（[withUpdatingProgress]）。
+  func withProgress<T>(_ message: String, _ action: () async throws -> T) async throws -> T {
     try await withUpdatingProgress(message) { _ in try await action() }
-  }
-
-  /// [withUpdatingProgress] と同じく「処理中」を表示し、[cancellable] なら Esc で [action] の Task を取り消す
-  /// （外部コマンドは [runProcess] が止める）。取り消したときは、[action] が途中で失敗しても [CancellationError] を投げる。
-  func withCancellableProgress<T>(
-    _ message: String,
-    cancellable: Bool,
-    _ action: @escaping (_ update: @escaping (String) -> Void) async throws -> T
-  ) async throws -> T {
-    var task: Task<T, Error>?
-    return try await withUpdatingProgress(message, onEscape: cancellable ? { task?.cancel() } : nil) { update in
-      let running = Task { try await action(update) }
-      task = running
-      do {
-        return try await running.value
-      } catch {
-        throw running.isCancelled ? CancellationError() : error
-      }
-    }
   }
 
   /// [withProgress] と同じく「処理中」を表示し、[action] に渡す update で文言を変えられる（「3/5 件目」など）。
   /// [onEscape] を渡すと、Esc で呼ぶ（[action] を止めるのは呼ばれた側）。
+  /// 渡さなければ、Esc で [action] の Task を取り消し（外部コマンドは [runProcess] が止める）、[action] が終わるのを待って
+  /// [CancellationError] を投げる（[action] が途中で失敗しても、値を返しても）。
   func withUpdatingProgress<T>(
     _ message: String,
     onEscape: (() -> Void)? = nil,
     _ action: (_ update: @escaping (String) -> Void) async throws -> T
-  ) async rethrows -> T {
+  ) async throws -> T {
     let dialog = ProgressDialog(message, onEscape: onEscape)
     let close = openModal(dialog)
     defer {
@@ -1075,7 +1064,7 @@ extension App {
     var lastRender = clock.now - interval
     // 間隔を空けて描き直す予定（最後の文言も出るように）。
     var pendingRender: OneShotTimer?
-    return try await action { [unowned self] next in
+    let update: (String) -> Void = { [unowned self] next in
       dialog.message = next
       if pendingRender != nil {
         return
@@ -1094,5 +1083,49 @@ extension App {
         }
       }
     }
+    if onEscape != nil {
+      return try await action(update)
+    }
+    return try await cancellableOnEscape(dialog) { try await action(update) }
   }
+
+  /// [action] を子の Task で動かし、[dialog] で Esc を押したら取り消す。取り消したら、終わるのを待って [CancellationError]。
+  private func cancellableOnEscape<T>(_ dialog: ProgressDialog, _ action: () async throws -> T) async throws -> T {
+    let (escapes, escape) = AsyncStream<Void>.makeStream()
+    dialog.onEscape = { escape.yield() }
+    return try await withoutActuallyEscaping(action) { action in
+      try await withThrowingTaskGroup(of: ProgressOutcome<T>.self) { group in
+        group.addTask { @MainActor in .done(try await action()) }
+        group.addTask { @MainActor in
+          for await _ in escapes {
+            return .escaped
+          }
+          return .escaped
+        }
+        let first: ProgressOutcome<T>
+        do {
+          first = try await group.next()!
+        } catch {
+          group.cancelAll()
+          throw error
+        }
+        group.cancelAll()
+        guard case .done(let value) = first else {
+          // 取り消した [action] が終わるのを待つ（失敗しても、値を返しても捨てる）。
+          dialog.onEscape = nil
+          dialog.message = tr("dialogs.aborting")
+          requestRender()
+          while (try? await group.next()) != nil {}
+          throw CancellationError()
+        }
+        return value
+      }
+    }
+  }
+}
+
+/// [App.cancellableOnEscape] の子の Task の結果。
+private enum ProgressOutcome<T> {
+  case done(T)
+  case escaped
 }
