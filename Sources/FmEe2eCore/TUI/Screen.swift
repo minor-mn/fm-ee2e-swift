@@ -84,6 +84,9 @@ nonisolated enum Palette {
   /// 差分の、追加した行・消した行の印と数の色。
   static var diffAdded: Rgb { colors.diffAdded }
   static var diffRemoved: Rgb { colors.diffRemoved }
+
+  /// 検索で、ファイル内容に合った文字列の色。
+  static var findMatch: Rgb { colors.findMatch }
 }
 
 nonisolated struct Style: Hashable, Sendable {

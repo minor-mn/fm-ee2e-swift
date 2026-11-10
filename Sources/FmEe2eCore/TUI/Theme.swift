@@ -64,6 +64,9 @@ nonisolated struct ThemeColors: Sendable {
   var diffAdded = Rgb(0x2EE0A8)
   var diffRemoved = Rgb(0xFF4D5E)
 
+  /// 検索（F）で、ファイル内容の正規表現に合った文字列の色。
+  var findMatch = Rgb(0xA6FF4D)
+
   /// git status の、変更の種類（[GitStatusLine.statusKey]）ごとの色。ないものは補足の文字の色。
   var gitStatus: [String: Rgb] = [:]
 

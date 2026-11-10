@@ -121,7 +121,7 @@ let functionKeys: [(String, String)?] = [
   ("Mkdir", "char:k"),
   ("Rename", "char:r"),
   ("Edit", "char:e"),
-  ("Format", "char:f"),
+  ("Find", "char:f"),
   ("TileView", "ctrl:t"),
   nil,
 ]

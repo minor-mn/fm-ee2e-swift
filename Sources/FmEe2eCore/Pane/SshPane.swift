@@ -17,7 +17,7 @@ class SshPane: PathPane {
   /// つないで、ファイルの一覧を出している。
   private var browsing: Bool { ssh != nil }
 
-  override var canTile: Bool { browsing }
+  override var canTile: Bool { browsing && found == nil }
 
   override func tileable(_ entry: Entry) -> Bool { super.tileable(entry) && entry.data is RemoteEntry }
 
@@ -38,7 +38,10 @@ class SshPane: PathPane {
 
   /// つなぐ前（接続先の一覧）は、Enter・L・O だけ。
   override var commands: [Operation: Command] {
-    browsing
+    if browsing && found != nil {
+      return foundCommands
+    }
+    return browsing
       ? [
         .enter: EnterCommand(),
         .reload: ReloadCommand(),
@@ -56,6 +59,7 @@ class SshPane: PathPane {
         .goToPath: SshGoToPath(),
         .signOut: SshDisconnect(),
         .shell: SshShell(),
+        .find: RemoteFind(),
         // 右の SSH のタブで G・F12 は、左へのコピー。左のローカルへのダウンロードか、左の SSH の接続先へ（そこからつないだとき）。
         .transfer: via == nil ? SshScp() : RightSshScp(),
       ]
@@ -71,7 +75,12 @@ class SshPane: PathPane {
   ]
 
   /// つなぐ前は、カーソル移動・ヘルプ・終了だけ。
-  override func allowsKey(_ id: String) -> Bool { browsing || Self.keysBeforeConnect.contains(id) }
+  override func allowsKey(_ id: String) -> Bool {
+    if found != nil {
+      return Self.foundKeys.contains(id)
+    }
+    return browsing || Self.keysBeforeConnect.contains(id)
+  }
 
   override var canClip: Bool { ssh != nil && !readOnly }
 
@@ -125,6 +134,9 @@ class SshPane: PathPane {
   }
 
   override var location: String {
+    if ssh != nil && found != nil {
+      return foundLocation
+    }
     if let current = ssh {
       if let archive {
         return "\(current.host):\(PathContext.posix.join(archive.path, archiveDir))"
@@ -175,6 +187,9 @@ class SshPane: PathPane {
       return try await fetch()
     }
     message = nil
+    if found != nil {
+      return try await fetchFound()
+    }
     if let archive {
       return archiveChildren(archive.items, archiveDir).map { item in
         Entry(name: item.name, isDir: item.isDir, size: item.isDir ? nil : item.size, modified: item.modified, data: item)
@@ -199,11 +214,15 @@ class SshPane: PathPane {
     }
   }
 
-  override var canGoUp: Bool { ssh != nil && (inArchive || dir != "/") }
+  override var canGoUp: Bool { ssh != nil && found == nil && (inArchive || dir != "/") }
 
   override var folderKey: String {
     if ssh == nil {
       return ""
+    }
+    // 検索の結果では、どのフォルダーでもないキーにする（読み直しで、開いていたフォルダーのマークを外さないため）。
+    if found != nil {
+      return "find:"
     }
     if let archive {
       return "\(PathContext.posix.join(archive.path, archiveDir))/"
@@ -237,6 +256,19 @@ class SshPane: PathPane {
 
   override func markable(_ entry: Entry) -> Bool { entry.data is RemoteEntry }
 
+  /// 接続先のファイルは、フルパスで見分ける（検索の結果でつけたマークも、そのフォルダーを開けば同じ項目になる）。
+  override func keyOf(_ entry: Entry) -> String { entry.data is RemoteEntry ? pathOf(entry) : super.keyOf(entry) }
+
+  /// 検索の結果は、同じ条件で探し直す（接続先で1回の実行で済むので、見つけたファイルだけを読み直すより簡単）。
+  override func refind(_ found: Found) async throws -> [FoundItem] {
+    guard let ssh else { return [] }
+    return try await findRemoteFiles(ssh, found.query)
+  }
+
+  override func foundData(_ item: FoundItem) -> Any {
+    RemoteEntry(name: PathContext.posix.basename(item.path), isDir: false, size: item.size, modified: item.modified, mode: item.mode.map { $0 & 0xfff })
+  }
+
   override func fetchUsage() async throws -> DiskUsage? { try await ssh?.usage(dir) }
 
   override func ownershipOf(_ entry: Entry) -> Ownership? {
@@ -258,6 +290,15 @@ class SshPane: PathPane {
 
   override func open(_ entry: Entry) async {
     do {
+      // 検索の結果のファイルは、画像・動画はダウンロードして開き、ほかは接続先のエディタで開く（圧縮ファイルの中には入らない）。
+      if found != nil {
+        if previewKindOf(entry.name) != nil {
+          try await openDownloaded(entry)
+        } else {
+          await editFile(pathOf(entry))
+        }
+        return
+      }
       switch entry.data {
       case let host as SshHost:
         try await connect(host.host)
@@ -472,6 +513,7 @@ class SshPane: PathPane {
 
   /// 接続先の一覧に戻すため、接続とその接続先の状態を忘れる（接続は閉じない）。
   private func forgetConnection() {
+    clearFound()
     ssh = nil
     marks.clear()
     names.removeAll()

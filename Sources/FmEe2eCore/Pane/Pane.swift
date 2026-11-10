@@ -237,8 +237,11 @@ class Pane {
     guard let entry = current, !entry.isParent || includeParent else {
       return []
     }
-    return [Mark(entry, folderKey)]
+    return [markFor(entry)]
   }
+
+  /// [entry] をマークしたときのもの。ふつうは開いているフォルダーの項目（検索の結果は、そのファイルのあるフォルダー）。
+  func markFor(_ entry: Entry) -> Mark { Mark(entry, folderKey) }
 
   /// [targetsFor] の、親フォルダーを含めないもの。
   var targetMarks: [Mark] { targetsFor() }
@@ -344,7 +347,7 @@ class Pane {
     marks.removeAll { key, mark in mark.parent == folder && byKey[key] == nil }
     for key in marks.keys {
       if let fresh = byKey[key] {
-        marks[key] = Mark(fresh, folder)
+        marks[key] = markFor(fresh)
       }
     }
   }
@@ -361,7 +364,7 @@ class Pane {
     }
     let key = keyOf(entry)
     if marks.removeValue(forKey: key) == nil {
-      marks[key] = Mark(entry, folderKey)
+      marks[key] = markFor(entry)
     }
   }
 
@@ -668,6 +671,12 @@ class Pane {
   /// 右に出しているときの G・F12 の転送。右に出すタブだけが持つ。
   var transferCommand: Command? { nil }
 
+  /// Esc で閉じるもの（検索の結果など）を出していれば、その Esc の説明。なければ nil。
+  var escapeLabel: String? { nil }
+
+  /// [escapeLabel] のものを閉じて、元の一覧に戻る。
+  func closeByEscape() async {}
+
   /// コマンドではないキー（カーソル移動・マーク・プレビューなど）を使えるか。
   /// [id] はキーの名前、文字は「char:小文字」。
   func allowsKey(_ id: String) -> Bool { true }
@@ -703,8 +712,179 @@ class PathPane: Pane {
   /// [path] のファイルをエディタで開く。
   func editFile(_ path: String) async {}
 
-  func pathOf(_ entry: Entry) -> String { context.join(dirPath, entry.name) }
+  func pathOf(_ entry: Entry) -> String {
+    if found != nil, let path = foundPaths[ObjectIdentifier(entry)] {
+      return path
+    }
+    return context.join(dirPath, entry.name)
+  }
 
   /// マークした項目のフルパス。
   func pathOfMark(_ mark: Mark) -> String { context.join(mark.parent, mark.entry.name) }
+
+  // ---- 検索の結果（F・F9） ----
+  // 一覧の代わりに、窓いっぱいに出す。タブごとの継承クラスは、一覧の場所・使えるキーなどを [found] のときこの共通部分に任せる。
+
+  /// 一覧の代わりに出している検索の結果。
+  final class Found {
+    init(_ query: FindQuery, _ items: [FoundItem], focus: String?) {
+      self.query = query
+      self.items = items
+      paths = items.map(\.path)
+      self.focus = focus
+    }
+
+    let query: FindQuery
+
+    /// 探したときに読んだ結果。最初の読み込みで使い、そのあとは [refind] で読み直す。
+    var items: [FoundItem]?
+    let paths: [String]
+
+    /// 閉じたときにカーソルを戻す名前。
+    let focus: String?
+  }
+
+  private(set) var found: Found?
+
+  /// 結果の一覧の項目ごとのフルパス（項目の名前はファイルの名前だけなので）。
+  private var foundPaths: [ObjectIdentifier: String] = [:]
+
+  /// 検索の結果を、窓いっぱいの一覧に出す。中身で探したときは、ファイルの下に合った行と前後の行を出す。
+  func showFound(_ query: FindQuery, _ items: [FoundItem]) async {
+    found = Found(query, items, focus: current?.name)
+    resetCursor()
+    await load()
+  }
+
+  /// 検索の結果を出すのをやめる（読み直しはしない）。
+  func clearFound() {
+    found = nil
+    foundPaths = [:]
+  }
+
+  /// 結果の一覧を読み直す（エディタで書き換えたあとなど）。
+  func refind(_ found: Found) async throws -> [FoundItem] { [] }
+
+  /// 結果のファイルの行の [Entry.data]（ローカルは LocalFile、接続先は RemoteEntry）。
+  func foundData(_ item: FoundItem) -> Any { fatalError("foundData") }
+
+  /// [found] のときの [fetch]。ファイルの行の下に、合った行・前後の行を置き、中身で探したときはファイルごとに1行空ける。
+  func fetchFound() async throws -> [Entry] {
+    guard let found else {
+      return []
+    }
+    let items: [FoundItem]
+    if let first = found.items {
+      items = first
+      found.items = nil
+    } else {
+      items = try await refind(found)
+    }
+    var paths: [ObjectIdentifier: String] = [:]
+    var list: [Entry] = []
+    for item in items {
+      if !list.isEmpty && !found.query.content.isEmpty {
+        list.append(Entry(name: "", isDir: false, data: FoundLine(.blank)))
+      }
+      let file = Entry(
+        name: context.basename(item.path), isDir: false, size: item.size, modified: item.modified,
+        executable: (item.mode ?? 0) & 0x49 != 0, mode: item.mode.map { $0 & 0xfff }, data: foundData(item)
+      )
+      paths[ObjectIdentifier(file)] = item.path
+      list.append(file)
+      list += item.lines.map { Entry(name: "", isDir: false, data: $0) }
+    }
+    foundPaths = paths
+    return list
+  }
+
+  override var escapeLabel: String? { found == nil ? nil : tr("find.close") }
+
+  /// 検索の結果を閉じて、元のフォルダーの一覧に戻る。マークはそのまま残す。
+  override func closeByEscape() async {
+    guard let found else {
+      return
+    }
+    clearFound()
+    resetCursor()
+    await load(focus: found.focus)
+  }
+
+  /// 検索の結果で使えるキー（カーソル移動・Enter・E・マーク・Esc）。
+  static let foundKeys: Set<String> = [
+    "up", "down", "pageUp", "pageDown", "home", "end", "enter", "char:e", "char: ", "char:　", "escape",
+  ]
+
+  /// 検索の結果で使えるコマンド（Enter・E）。
+  var foundCommands: [Operation: Command] { [.enter: EnterCommand(), .edit: PathEdit()] }
+
+  /// 検索の結果を出しているときの、上の場所の行。
+  var foundLocation: String { tr("find.location", ["count": found?.paths.count ?? 0, "path": found?.query.root ?? ""]) }
+
+  /// 合った行・前後の行にはカーソルが乗らず、マークもできない。
+  override func selectable(_ entry: Entry) -> Bool { !(entry.data is FoundLine) }
+
+  override func markable(_ entry: Entry) -> Bool { !(entry.data is FoundLine) }
+
+  /// 結果のファイルのマークは、そのファイルのあるフォルダーのものにする（閉じたあと、そのフォルダーを開けばマークが見える）。
+  override func markFor(_ entry: Entry) -> Mark { found == nil ? super.markFor(entry) : Mark(entry, context.dirname(pathOf(entry))) }
+
+  /// 検索の結果は、探し始めたフォルダーからの相対パスで出し、合った行と前後の行はその下に字下げして出す。
+  override func drawRow(_ screen: Screen, _ entry: Entry, _ x: Int, _ y: Int, _ width: Int, _ style: Style, marked: Bool) {
+    guard let found else {
+      super.drawRow(screen, entry, x, y, width, style, marked: marked)
+      return
+    }
+    if let line = entry.data as? FoundLine {
+      switch line.kind {
+      case .gap:
+        screen.text(x + 4, y, "…", style.copyWith(fg: Palette.muted))
+        return
+      case .more:
+        screen.text(x + 4, y, truncate(tr("find.more"), max(0, width - 4)), style.copyWith(fg: Palette.muted))
+        return
+      case .blank:
+        return
+      case .line:
+        break
+      }
+      let label = padLeft(String(line.number), 6) + ": "
+      screen.text(x + 4, y, label, style.copyWith(fg: line.matched ? Palette.lime : Palette.muted, bold: line.matched))
+      drawFoundText(screen, line, x + 4 + textWidth(label), y, x + width, style)
+      return
+    }
+    let relative = Entry(
+      name: context.relative(pathOf(entry), from: found.query.root), isDir: entry.isDir, size: entry.size, modified: entry.modified,
+      executable: entry.executable, mode: entry.mode, isLink: entry.isLink, data: entry.data
+    )
+    super.drawRow(screen, relative, x, y, width, style, marked: marked)
+  }
+
+  /// 合った行・前後の行の中身を [x] から [limit] の手前まで描く。合った部分は検索の色（find.match）の太字にする。
+  private func drawFoundText(_ screen: Screen, _ line: FoundLine, _ x: Int, _ y: Int, _ limit: Int, _ style: Style) {
+    let base = style.copyWith(fg: line.matched ? Palette.text : Palette.muted)
+    let characters = Array(line.text)
+    // 合った部分とそれ以外に分ける。
+    var parts: [(text: ArraySlice<Character>, hit: Bool)] = []
+    var position = 0
+    for range in line.matches where range.lowerBound >= position && range.upperBound <= characters.count {
+      parts.append((characters[position..<range.lowerBound], false))
+      parts.append((characters[range], true))
+      position = range.upperBound
+    }
+    parts.append((characters[position...], false))
+    var col = x
+    for part in parts where !part.text.isEmpty {
+      // タブは空白にし、制御文字は出さない（桁がずれないように）。
+      let text = String(String(part.text).replacingOccurrences(of: "\t", with: "    ").unicodeScalars.map { $0.value < 0x20 ? " " : Character($0) })
+      guard col < limit else {
+        return
+      }
+      let shown = truncate(text, limit - col)
+      col += screen.text(col, y, shown, part.hit ? base.copyWith(fg: Palette.findMatch, bold: true) : base)
+      if shown != text {
+        return
+      }
+    }
+  }
 }

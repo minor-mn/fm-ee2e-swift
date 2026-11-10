@@ -2,7 +2,10 @@ import AppKit
 
 class LocalPane: PathPane {
   override var commands: [Operation: Command] {
-    [
+    if found != nil {
+      return foundCommands
+    }
+    return [
       .enter: EnterCommand(),
       .reload: ReloadCommand(),
       .delete: LocalDelete(),
@@ -19,9 +22,23 @@ class LocalPane: PathPane {
       .goToPath: LocalGoToPath(),
       .shell: LocalShell(),
       .format: LocalFormat(),
+      .find: LocalFind(),
       .transfer: RightTransfer(),
     ]
   }
+
+  // ---- 検索の結果（F・F9。一覧の出し方は [PathPane] の共通部分） ----
+
+  override func allowsKey(_ id: String) -> Bool { found == nil ? super.allowsKey(id) : Self.foundKeys.contains(id) }
+
+  override var canTile: Bool { found == nil && super.canTile }
+
+  override func refind(_ found: Found) async throws -> [FoundItem] {
+    let (paths, query) = (found.paths, found.query)
+    return await Task.detached { refindFiles(paths, query) }.value
+  }
+
+  override func foundData(_ item: FoundItem) -> Any { LocalFile(item.path, item.size ?? 0) }
 
   override func makeClip(_ targets: [Mark], move: Bool) -> Clip? {
     LocalClip(targets.map(pathOfMark), move: move)
@@ -68,7 +85,12 @@ class LocalPane: PathPane {
 
   override var title: String { "Local" }
 
-  override var location: String { inArchive ? p.join(archive!, archiveDir) : dir }
+  override var location: String {
+    if found != nil {
+      return foundLocation
+    }
+    return inArchive ? p.join(archive!, archiveDir) : dir
+  }
 
   override var accent: Rgb { colors.accent ?? colors.purple }
 
@@ -78,6 +100,13 @@ class LocalPane: PathPane {
   private var ownership: [String: Ownership] = [:]
 
   override func fetch() async throws -> [Entry] {
+    if found != nil {
+      let list = try await fetchFound()
+      // 名前が重なるので、所有者などはパスで引く（[ownershipOf]）。
+      let paths = list.filter { $0.data is LocalFile }.map(pathOf)
+      ownership = await Self.readOwnership(paths.map { ($0, $0) })
+      return list
+    }
     if let archive {
       ownership = [:]
       let items: [ArchiveItem]
@@ -103,7 +132,7 @@ class LocalPane: PathPane {
     return entries
   }
 
-  override func ownershipOf(_ entry: Entry) -> Ownership? { ownership[entry.name] }
+  override func ownershipOf(_ entry: Entry) -> Ownership? { ownership[found == nil ? entry.name : pathOf(entry)] }
 
   /// stat でまとめて読む。読めなかった項目は結果に含めない。
   private static func readOwnership(_ paths: [(name: String, path: String)]) async -> [String: Ownership] {
@@ -166,9 +195,10 @@ class LocalPane: PathPane {
     return entries.sorted { compareEntries($0, $1) < 0 }
   }
 
-  override var canGoUp: Bool { inArchive || p.dirname(dir) != dir }
+  override var canGoUp: Bool { found == nil && (inArchive || p.dirname(dir) != dir) }
 
-  override var folderKey: String { inArchive ? "\(p.join(archive!, archiveDir))/" : dir }
+  /// 検索の結果では、どのフォルダーでもないキーにする（読み直しで、開いていたフォルダーのマークを外さないため）。
+  override var folderKey: String { found != nil ? "find:" : inArchive ? "\(p.join(archive!, archiveDir))/" : dir }
 
   override func keyOf(_ entry: Entry) -> String { pathOf(entry) }
 
@@ -260,7 +290,15 @@ class LocalPane: PathPane {
   /// [entry] を開く。エディタで開くときは、[editFrame] の場所を覆う。
   func open(_ entry: Entry, editFrame: ModalFrame) async {
     do {
-      if inArchive {
+      // 検索の結果のファイルは、エディタで編集できるものはエディタで、ほかはそのファイルのアプリで開く。
+      if found != nil {
+        let path = pathOf(entry)
+        if await shouldEditInTerminal(path) {
+          await editFile(path, frame: editFrame)
+        } else {
+          try await openFile(path)
+        }
+      } else if inArchive {
         let item = entry.data as! ArchiveItem
         if entry.isDir {
           await goToArchiveDir(item.path)

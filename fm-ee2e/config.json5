@@ -66,6 +66,12 @@
       location: {
         color: "#666666",
       },
+      // 検索（F）で、ファイル内容に合った文字列。タブごとにも書ける。
+      find: {
+        match: {
+          color: "#A6FF4D",
+        },
+      },
     },
 
     // Tab: Local

@@ -120,14 +120,14 @@ final class ContainerPane: SshPane {
   }
   override var canMark: Bool { ssh == nil || super.canMark }
   override func markable(_ entry: Entry) -> Bool { entry.data is ContainerTarget || (!(entry.data is ContainerSection) && super.markable(entry)) }
-  override func selectable(_ entry: Entry) -> Bool { !(entry.data is ContainerSection) }
+  override func selectable(_ entry: Entry) -> Bool { !(entry.data is ContainerSection) && super.selectable(entry) }
   override var folderKey: String { ssh == nil ? "container-list" : super.folderKey }
   override func keyOf(_ entry: Entry) -> String {
     if let target = entry.data as? ContainerTarget { return "container:\(target.name)" }
     return super.keyOf(entry)
   }
   override var keyOperations: [String: Operation] {
-    ssh == nil ? ["char:c": .create, "f1": .create, "f2": .extract, "f3": .shell, "f4": .delete, "f5": .chmod, "f12": .logs] : [:]
+    ssh == nil ? ["char:c": .create, "f1": .create, "f2": .extract, "f3": .shell, "f4": .delete, "f5": .chmod, "f12": .logs, "ctrl:c": .compose] : [:]
   }
 
   var targetStatuses: Set<String> {
@@ -163,7 +163,7 @@ final class ContainerPane: SshPane {
     }
   }
 
-  /// L（読み直し）。コンテナの一覧を出しているときは、今のフォルダーの docker-compose（F で選んだファイルがあればそれ）から
+  /// L（読み直し）。コンテナの一覧を出しているときは、今のフォルダーの docker-compose（Ctrl+C で選んだファイルがあればそれ）から
   /// 保存済みの設定（.fm-ee2e/project.json5・containers/*.json5）を作り直してから読み直す。
   override func reload() async {
     if ssh == nil && ready && !serviceStopped { rebuildFromCompose() }
@@ -431,6 +431,9 @@ final class ContainerPane: SshPane {
   }
 
   override var commands: [Operation: Command] {
+    if ssh != nil && found != nil {
+      return super.commands
+    }
     if ssh != nil {
       var result = super.commands
       result[.transfer] = ContainerTransfer(upload: false)
@@ -438,17 +441,20 @@ final class ContainerPane: SshPane {
     }
     return [.enter: ContainerEnter(), .reload: ReloadCommand(), .extract: ContainerAction("start"),
       .shell: ContainerAction("stop"), .create: ContainerAction("create"),
-      .delete: ContainerAction("delete"), .format: ComposeFiles(), .chmod: ContainerSettingsCommand(), .logs: ContainerLogs()]
+      .delete: ContainerAction("delete"), .compose: ComposeFiles(), .chmod: ContainerSettingsCommand(), .logs: ContainerLogs()]
   }
   override var transferCommand: Command? { ContainerTransfer(upload: true) }
 
   override func allowsKey(_ id: String) -> Bool {
+    if found != nil {
+      return super.allowsKey(id)
+    }
     if ssh == nil, id.hasPrefix("f"), let number = Int(id.dropFirst()) {
       guard (1...12).contains(number) else { return false }
       guard let keys = functionKeyLayout else { return false }
       return keys[number - 1] != nil
     }
-    return super.allowsKey(id) || ["enter", "char:l", "char:u", "char:s", "char:c", "char:d", "char:f", "char:a", "char: ", "char:　", "char:*", "delete", "f2", "f4", "f9"].contains(id)
+    return super.allowsKey(id) || ["enter", "char:l", "char:u", "char:s", "char:c", "char:d", "ctrl:c", "char:a", "char: ", "char:　", "char:*", "delete", "f2", "f4"].contains(id)
   }
 
   func refreshContext() async {
@@ -1060,7 +1066,7 @@ final class ContainerPane: SshPane {
     }.sorted()
   }
 
-  /// 重ねる Compose ファイルを、一覧から重ねる順に1つずつ選ぶ（F）。何も選ばずに決めると自動の選び方に戻る。
+  /// 重ねる Compose ファイルを、一覧から重ねる順に1つずつ選ぶ（Ctrl+C）。何も選ばずに決めると自動の選び方に戻る。
   func chooseComposeFiles() async {
     let directory = NativeContainerProject.findRoot(localDirectory()) ?? localDirectory()
     let found = Self.composeCandidates(directory)

@@ -386,6 +386,9 @@ final class MainView: View, Workspace {
     }
     keys.append(("ctrl:l", "Ctrl+L", "Location"))
     keys.append(("char:o", "O", "clOse"))
+    if let label = active.escapeLabel {
+      keys.insert(("escape", "Esc", label), at: 0)
+    }
     drawKeyHints(screen, y, keys.filter { canPress($0.0) }.map { ($0.1, operationLabel($0.0, fallback: $0.2)) }, note: c.map {
       tr("main_view.clip.note", ["action": $0.move ? tr("main_view.clip.move") : tr("main_view.clip.copy"), "count": $0.length])
     })
@@ -499,7 +502,11 @@ final class MainView: View, Workspace {
       }
       return
     }
-    // Esc は、C・M で選んでいればそれを取り消す（どのタブでも）。
+    // Esc は、検索の結果などを出していればそれを閉じ、なければ C・M で選んだものを取り消す（どのタブでも）。
+    if key.name == "escape", pane.escapeLabel != nil {
+      run { await pane.closeByEscape() }
+      return
+    }
     if key.name == "escape" {
       clip = nil
       return
@@ -623,7 +630,6 @@ final class MainView: View, Workspace {
     "f6": .mkdir,
     "f7": .rename,
     "f8": .edit,
-    "f9": .format,
     "f12": .transfer,
     "ctrl:l": .goToPath,
     "char:p": .paste,
@@ -634,7 +640,6 @@ final class MainView: View, Workspace {
     "char:r": .rename,
     "char:k": .mkdir,
     "char:t": .touch,
-    "char:f": .format,
     "char:z": .compress,
     "char:u": .extract,
     "char:o": .signOut,
@@ -645,7 +650,14 @@ final class MainView: View, Workspace {
   ]
 
   private func operationForKey(_ id: String) -> Operation? {
-    active.keyOperations[id] ?? Self.operations[id]
+    if let operation = active.keyOperations[id] {
+      return operation
+    }
+    // F・F9 は Find。対象（マークがあればマークした全部、なければカーソル）が、変換できる同じ種類のファイルなら Format。
+    if id == "char:f" || id == "f9" {
+      return active.commands[.format]?.available(active) == true ? .format : .find
+    }
+    return Self.operations[id]
   }
 
   /// 非同期の操作を1つずつ実行する。終わったら、git の窓を出していれば読み直す（フォルダーの移動やファイルの操作に合わせる）。
