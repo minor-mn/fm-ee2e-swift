@@ -231,6 +231,7 @@
     // Local to local
     copy: "Copy",
     copy_confirm: "Copy {label} to {dir}.",
+    same_folder: "The source and destination are the same folder.",
     // SSH (scp)
     ssh_not_selected: "Choose an SSH host.",
     scp_confirm: "{title}: {label}",

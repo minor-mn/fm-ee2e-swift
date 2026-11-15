@@ -231,6 +231,7 @@
     // ローカル同士
     copy: "コピー",
     copy_confirm: "{label}を {dir} にコピーします。",
+    same_folder: "コピー元とコピー先が同じフォルダーです。",
     // SSH（scp）
     ssh_not_selected: "SSH の接続先を選んでください。",
     scp_confirm: "{label} を{title}します",
