@@ -318,6 +318,11 @@ class FolderCopyCommand: Command {
     if targets.isEmpty {
       return
     }
+    // 同じフォルダーへのコピーは、上書きを選ぶとコピー元をゴミ箱に移してしまう（シンボリックリンク越しの同じ場所も含む）。
+    if URL(fileURLWithPath: from.dir).resolvingSymlinksInPath().path == URL(fileURLWithPath: to.dir).resolvingSymlinksInPath().path {
+      app.showStatus(tr("transfer.same_folder"))
+      return
+    }
     if !(await from.checkWritable()) {
       return
     }
