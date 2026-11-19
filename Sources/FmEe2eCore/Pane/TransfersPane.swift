@@ -1,8 +1,8 @@
 import Foundation
 
 /// 転送タブ。G・F12 の転送の履歴（[Transfers]）を、転送ごとの見出しの行と、その下の項目の行で出す。
-/// 最初の転送を始めたときに作られ、転送先の側に出る。G・F12 のメニューで、カーソル（マークがあればマーク）の転送・項目を
-/// 止め（cancel）、失敗した・止めた項目をやり直す（retry）。Enter で、切り替わる前のタブに戻る。
+/// 最初の転送を始めたときに作られ、転送先の側に出る。G のメニューで、カーソル（マークがあればマーク）の転送・項目を
+/// 止め（cancel）、失敗した・止めた項目をやり直す（retry）。F12 で終わった転送の履歴を消す。Enter で、切り替わる前のタブに戻る。
 final class TransfersPane: Pane {
   init(_ app: App, _ transfers: Transfers) {
     self.transfers = transfers
@@ -43,7 +43,10 @@ final class TransfersPane: Pane {
   /// 行は、転送・項目そのもので見分ける（同じ名前の行が並ぶことがある）。
   override func keyOf(_ entry: Entry) -> String { "\(ObjectIdentifier(entry.data as AnyObject).hashValue)" }
 
-  override var commands: [Operation: Command] { [.enter: LeaveTransfers(), .transfer: TransferMenu()] }
+  override var commands: [Operation: Command] { [.enter: LeaveTransfers(), .transfer: TransferMenu(), .clearHistory: ClearTransfers()] }
+
+  /// F12 は履歴を消す（G は転送のメニューのまま）。
+  override var keyOperations: [String: Operation] { ["f12": .clearHistory] }
 
   override func fetch() async throws -> [Entry] { rows() }
 
@@ -126,7 +129,23 @@ final class LeaveTransfers: Command {
   override func run(_ c: CommandContext) async { c.workspace.leaveTransfers() }
 }
 
-/// 転送タブの G・F12。カーソル（マークがあればマーク）の転送・項目に使える操作を小窓のメニューに出す（Git のタブと同じ）。
+/// 転送タブの F12。終わった転送を、確かめずに履歴から消す（送っている・待っている転送は残す）。
+final class ClearTransfers: Command {
+  override var label: String { "Clear" }
+
+  override var needsReady: Bool { false }
+
+  override func available(_ pane: Pane) -> Bool { (pane as? TransfersPane)?.transfers.hasClearable == true }
+
+  override func run(_ c: CommandContext) async {
+    guard let pane = c.pane as? TransfersPane else { return }
+    pane.transfers.clearFinished()
+    pane.marks.clear()
+    pane.refresh()
+  }
+}
+
+/// 転送タブの G。カーソル（マークがあればマーク）の転送・項目に使える操作を小窓のメニューに出す（Git のタブと同じ）。
 /// 待っている・送っている項目があれば cancel（確かめずにすぐ止める）、送っている転送があれば cancel running
 /// （カーソルによらず、その転送の残りをまるごと止める）、失敗した・止めた項目があれば retry。
 /// 見出しの行は、その転送の項目すべてを対象にする。使える操作がなければ何もしない。
@@ -158,7 +177,7 @@ final class TransferMenu: Command {
     if options.isEmpty {
       return
     }
-    // G・F12 で開いたので、もう一度 G・F12 を押すと閉じる。端で ↑↓ を押しても閉じる。
+    // G で開いたので、もう一度 G（F12 も）を押すと閉じる。端で ↑↓ を押しても閉じる。
     guard
       let choice = await c.app.askChoice(
         label, options, closeKey: { key in key.name == "f12" || key.isLetter("g") }, closeAtEdges: true)

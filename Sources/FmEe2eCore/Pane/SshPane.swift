@@ -270,6 +270,7 @@ class SshPane: PathPane {
   }
 
   override func fetchUsage() async throws -> DiskUsage? { try await ssh?.usage(dir) }
+  override var memory: MemoryUsage? { usage?.memory }
 
   override func ownershipOf(_ entry: Entry) -> Ownership? {
     guard let e = entry.data as? RemoteEntry, let owner = e.owner, let group = e.group, let permissions = e.permissions else {

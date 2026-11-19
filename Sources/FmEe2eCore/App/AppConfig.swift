@@ -178,6 +178,7 @@ struct AppConfig {
       if key == .window {
         allowed["opacity"] = true
         allowed["blur"] = true
+        allowed["inactive"] = ["dim": true]
       }
       if key == .drive || key == .icloud {
         allowed["show_used"] = true
@@ -195,6 +196,11 @@ struct AppConfig {
     }
     if let blur = windowBlock["blur"], !(blur is NSNull) {
       appearance.blur = try bool(blur, "appearance.window.blur")
+    }
+    if let inactive = windowBlock["inactive"], !(inactive is NSNull),
+      let dim = try dictionary(inactive, "appearance.window.inactive")["dim"], !(dim is NSNull)
+    {
+      appearance.inactiveDim = try number(dim, "appearance.window.inactive.dim", 0...1)
     }
     // タブは、窓全体の色・文字を土台に、default、タブの順に重ねる（背景は窓全体から引き継がない）。
     var base = appearance.window

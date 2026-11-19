@@ -1,6 +1,8 @@
 import AppKit
 
 class LocalPane: PathPane {
+  override var memory: MemoryUsage? { memoryUsage() }
+
   override var commands: [Operation: Command] {
     if found != nil {
       return foundCommands

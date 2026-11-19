@@ -167,6 +167,20 @@ final class Transfers {
     pump()
   }
 
+  /// 履歴から消せる（終わって、後始末も済んだ）転送がある。
+  var hasClearable: Bool { jobs.contains { $0.finished && finishedJobs.contains(ObjectIdentifier($0)) } }
+
+  /// 終わった（後始末も済んだ）転送を、履歴から消す。
+  func clearFinished() {
+    jobs.removeAll { job in
+      let id = ObjectIdentifier(job)
+      guard job.finished && finishedJobs.contains(id) else { return false }
+      finishedJobs.remove(id)
+      return true
+    }
+    onChange?()
+  }
+
   /// 次の待っている項目（順番待ちの順の最も小さいもの）を送る。送っている間は何もしない。
   private func pump() {
     if current != nil {

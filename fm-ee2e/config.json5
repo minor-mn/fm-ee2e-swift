@@ -30,6 +30,10 @@
       opacity: 0.9,
       // 窓の後ろをぼかす
       blur: true,
+      // 選んでいない側の窓に重ねる黒の濃さ（0〜1）。0 なら暗くしない。書かなければ 0.5。
+      inactive: {
+        dim: 0.5,
+      },
       background: {
         gradient: {
           from: "#1B1030",

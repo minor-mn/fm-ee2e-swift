@@ -176,17 +176,64 @@ final class MainView: View, Workspace {
   private var leftTransfers = false
   private var rightTransfers = false
 
+  /// Tab・Shift+Tab の切り替えに転送タブを入れるか（履歴があるときだけ）。
+  private var transfersInCycle: Bool { transfersPane != nil && !transfers.jobs.isEmpty }
+
+  /// 転送ごとの向き（送り先が左の窓なら true）。下の帯の右に点滅させる矢印に使う。
+  private var transferToLeft: [ObjectIdentifier: Bool] = [:]
+
+  /// 転送している間、矢印を点滅させるタイマーと、今出しているか。
+  private var blinkTimer: PeriodicTimer?
+  private var blinkOn = false
+
+  /// 転送を始めても、すぐには転送タブに切り替えない。下の帯の右に矢印を点滅させ、
+  /// 1.5秒たっても終わっていなければ、送り先の側を転送タブにする。
   func startTransfer(_ job: TransferJob, to destination: Pane) {
     if transfersPane == nil {
       transfersPane = TransfersPane(app, transfers)
     }
-    if left === destination {
-      leftTransfers = true
-    } else {
-      rightTransfers = true
-    }
+    let toLeft = left === destination
     transfers.add(job)
+    // Clear で消えた転送の向きは捨てる。
+    let ids = Set(transfers.jobs.map(ObjectIdentifier.init))
+    transferToLeft = transferToLeft.filter { ids.contains($0.key) }
+    transferToLeft[ObjectIdentifier(job)] = toLeft
+    startBlink()
+    Task { [weak self] in
+      await delay(milliseconds: 1500)
+      guard let self, !job.finished else { return }
+      if toLeft {
+        leftTransfers = true
+      } else {
+        rightTransfers = true
+      }
+      app.requestRender()
+    }
     app.requestRender()
+  }
+
+  private func startBlink() {
+    if blinkTimer != nil {
+      return
+    }
+    blinkOn = true
+    blinkTimer = PeriodicTimer(milliseconds: 500) { [weak self] in
+      guard let self else { return }
+      if transfers.busy {
+        blinkOn.toggle()
+      } else {
+        blinkTimer?.cancel()
+        blinkTimer = nil
+        blinkOn = false
+      }
+      app.requestRender()
+    }
+  }
+
+  /// 点滅させる矢印（送っている転送の向き）。送っていなければ nil。
+  private var transferArrow: String? {
+    guard blinkTimer != nil, let job = transfers.running?.job ?? transfers.jobs.last(where: { !$0.finished }) else { return nil }
+    return transferToLeft[ObjectIdentifier(job)] == true ? "←" : "→"
   }
 
   func leaveTransfers() {
@@ -289,7 +336,9 @@ final class MainView: View, Workspace {
     app.activeTheme = active.themeKey
     // プレビューは、選んでいる窓と反対側の窓に重ねる。
     let target = previewTarget()
-    screen.layer(0, 4, leftWidth, paneHeight, theme: left.themeKey, framed: true) { s in
+    // 選んでいない側の窓は暗くする（プレビューを重ねているときは、プレビューを暗くしない）。
+    let dim = Appearance.current.inactiveDim
+    screen.layer(0, 4, leftWidth, paneHeight, theme: left.themeKey, framed: true, dim: rightActive && target == nil ? dim : 0) { s in
       left.draw(s, 0, 0, s.width, s.height, focused: !rightActive, accentBorder: !rightActive)
       setFileDrop(s, left)
       if rightActive, let (source, entry, kind) = target {
@@ -297,9 +346,9 @@ final class MainView: View, Workspace {
         s.clearFileTargets()
       }
     }
-    // 右の窓（Google Drive・git・SSH・iCloud Drive）は、選んでいなくても色で見分けられるよう、いつも自分の色の枠にする。
-    screen.layer(leftWidth, 4, w - leftWidth, paneHeight, theme: right.themeKey, framed: true) { s in
-      right.draw(s, 0, 0, s.width, s.height, focused: rightActive, accentBorder: true)
+    // 右の窓も左と同じく、選んでいないときは灰色の枠にする。
+    screen.layer(leftWidth, 4, w - leftWidth, paneHeight, theme: right.themeKey, framed: true, dim: !rightActive && target == nil ? dim : 0) { s in
+      right.draw(s, 0, 0, s.width, s.height, focused: rightActive, accentBorder: rightActive)
       setFileDrop(s, right)
       if !rightActive, let (source, entry, kind) = target {
         preview.draw(s, source, entry, kind, 0, 0, s.width, s.height)
@@ -313,6 +362,10 @@ final class MainView: View, Workspace {
     // 裏で送っている転送は、案内とファンクションキーの間の行の左に出す（右は [App.showStatus] の文言）。
     if let line = transferLine {
       screen.text(1, h - 2, truncate(line, max(0, w * 2 / 3)), Style(fg: Palette.lime))
+    }
+    // 転送している間は、同じ行の右端（[App.showStatus] の欄）に向きの矢印を点滅させる。
+    if let arrow = transferArrow, blinkOn {
+      screen.text(w - 1 - textWidth(arrow), h - 2, arrow, Style(fg: Palette.lime, bold: true))
     }
     drawFunctionKeyBar(screen, h - 1)
   }
@@ -379,7 +432,7 @@ final class MainView: View, Workspace {
       ("char: ", "Space", tr("main_view.keys.mark")),
       ("tab", "Tab", tr("main_view.keys.tab")),
     ]
-    if config.leftTabs.count > 1 || transfersPane != nil {
+    if config.leftTabs.count > 1 || transfersInCycle || leftTransfers {
       keys.append(("backTab", "Shift+Tab", tr("main_view.keys.left_tab")))
     }
     if !active.tiled {
@@ -410,7 +463,12 @@ final class MainView: View, Workspace {
       // 同じ動きの文字キーなら、その文字を強める（Ctrl+T などは強めない）。
       return (operationLabel(id, fallback: label), id.hasPrefix("char:") ? String(id.dropFirst(5)).uppercased() : "")
     }
-    drawFunctionKeys(screen, y, keys + [canPress("char:g") ? (transferCommand?.label ?? "", "G") : nil])
+    // タブが F12 に別の操作を割り当てていれば（転送タブの Clear）、その操作を出す。
+    let f12: (String, String)? =
+      active.keyOperations["f12"] != nil
+      ? (canPress("f12") ? (operationLabel("f12", fallback: ""), "") : nil)
+      : (canPress("char:g") ? (transferCommand?.label ?? "", "G") : nil)
+    drawFunctionKeys(screen, y, keys + [f12])
   }
 
   private func operationLabel(_ id: String, fallback: String) -> String {
@@ -542,9 +600,14 @@ final class MainView: View, Workspace {
       pane.move(pane.entries.count)
     case "tab":
       // 右の窓を、設定ファイルの right_tabs の数の小さい順に切り替える（git は見つかったときだけ）。
-      // 0 のタブと、左の窓のタブで使えないタブは飛ばす。転送タブがあれば最後に入れる（nil）。
-      let cycle: [RightMode?] = rightModes.map { $0 } + (transfersPane == nil ? [] : [nil])
+      // 0 のタブと、左の窓のタブで使えないタブは飛ばす。転送タブは、履歴があれば最後に入れる（nil）。
+      // 履歴を消した転送タブからは抜けられるが、もう戻らない。
+      let cycle: [RightMode?] = rightModes.map { $0 } + (transfersInCycle ? [nil] : [])
       if cycle.isEmpty {
+        if rightTransfers {
+          rightTransfers = false
+          app.requestRender()
+        }
         return
       }
       rightChosen = true
@@ -701,9 +764,9 @@ final class MainView: View, Workspace {
   /// 左の窓を、設定ファイルの left_tabs の順に切り替える（Shift+Tab）。0 のタブは飛ばす。
   /// 右のタブはそのまま（右に出せないタブを出していれば、ローカル（off なら使えるうち最初のタブ）にする）。
   private func switchLeft() {
-    // 転送タブがあれば最後に入れる（nil）。
-    let cycle: [LeftMode?] = config.leftTabs.map { $0 } + (transfersPane == nil ? [] : [nil])
-    guard cycle.count > 1 else { return }
+    // 転送タブは、履歴があれば最後に入れる（nil）。履歴を消した転送タブからは抜けられるが、もう戻らない。
+    let cycle: [LeftMode?] = config.leftTabs.map { $0 } + (transfersInCycle ? [nil] : [])
+    guard cycle.count > 1 || leftTransfers else { return }
     let index = leftTransfers ? cycle.count - 1 : (cycle.firstIndex { $0 == leftMode } ?? 0)
     guard let next = cycle[(index + 1) % cycle.count] else {
       leftTransfers = true

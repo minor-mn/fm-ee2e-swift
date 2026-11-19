@@ -176,6 +176,11 @@ final class GridView: NSView, NSTextInputClient {
     drawScreen(context, screen, gridOrigin)
     drawSelection(context)
     drawCursor(context)
+    // 窓が選ばれていない（ほかのアプリ・窓が前にある）間は、全体を暗くする。
+    if !(window?.isKeyWindow ?? true) {
+      context.setFillColor(CGColor(gray: 0, alpha: 0.4))
+      context.fill(bounds)
+    }
   }
 
   /// 窓全体の背景。不透明度（appearance.window.opacity）をかける。
@@ -415,11 +420,39 @@ final class GridView: NSView, NSTextInputClient {
           width: CGFloat(top.width - 1) * inner.cellWidth, height: CGFloat(top.height - 1) * inner.cellHeight
         )
         knockOut(context, frame, top.theme, lines, fill: layer.fill)
+        if layer.dim > 0 {
+          // 背景は、枠の線から内側だけを、角の丸みに合わせて暗くする（枠の外の窓全体の背景は暗くしない）。
+          let radius = min(inner.cellWidth, inner.cellHeight) / 2
+          context.setFillColor(CGColor(gray: 0, alpha: layer.dim))
+          context.addPath(CGPath(roundedRect: lines, cornerWidth: radius, cornerHeight: radius, transform: nil))
+          context.fillPath()
+        }
       } else {
         knockOut(context, frame, top.theme, frame)
+        if layer.dim > 0 {
+          context.setFillColor(CGColor(gray: 0, alpha: layer.dim))
+          context.fill(frame)
+        }
       }
-      drawScreen(context, top, frame.origin)
+      drawDimmed(context, layer.dim, frame) { drawScreen(context, top, frame.origin) }
     }
+  }
+
+  /// [draw] で描いたもの（文字・枠の線・地の色・画像）だけを、[dim] の濃さの黒で暗くする。
+  /// 枠の線をまたぐタイトルの文字も、まとめて暗くなる。
+  private func drawDimmed(_ context: CGContext, _ dim: Double, _ frame: CGRect, _ draw: () -> Void) {
+    guard dim > 0 else {
+      draw()
+      return
+    }
+    context.saveGState()
+    context.beginTransparencyLayer(in: frame, auxiliaryInfo: nil)
+    draw()
+    context.setBlendMode(.sourceAtop)
+    context.setFillColor(CGColor(gray: 0, alpha: dim))
+    context.fill(frame)
+    context.endTransparencyLayer()
+    context.restoreGState()
   }
 
   private static func isAscii(_ text: String) -> Bool {
@@ -564,11 +597,19 @@ final class GridView: NSView, NSTextInputClient {
   private func selectable(at point: CGPoint) -> (SelectionSource, Screen, CGPoint)? {
     guard let screen = host.screen else { return nil }
     var found: (SelectionSource?, [Int], Screen, CGPoint)?
+    // 自分で中身を持つ画面（枠の中の端末など）の枠と余白（左右2桁・上下1行）の上。それより後に描いた画面がなければ、その画面を選ぶ。
+    var framing: (SelectionSource, Screen, CGPoint)?
     walkPaths(screen, gridOrigin, nil, []) { s, origin, source, path in
       let (x, y) = cellAt(point, s, origin)
       if x >= 0 && y >= 0 && x < s.width && y < s.height && (!s.clear || s.cell(x, y) != nil) {
         found = (source, path, s, origin)
+        framing = nil
+      } else if let source, x >= -2 && y >= -1 && x < s.width + 2 && y < s.height + 1 {
+        framing = (source, s, origin)
       }
+    }
+    if found?.0 == nil, let framing {
+      return framing
     }
     guard let (source, path, s, origin) = found else { return nil }
     return (source ?? ScreenText(path, self), s, origin)
@@ -684,8 +725,10 @@ final class GridView: NSView, NSTextInputClient {
       return
     }
     if let (source, s, origin) = selectable(at: point) {
-      let (x, y) = cellAt(point, s, origin)
-      let line = source.firstVisibleLine + y
+      // 枠の上から始めたときは、中の画面の端から。
+      let (cx, cy) = cellAt(point, s, origin)
+      let x = min(max(cx, 0), s.width - 1)
+      let line = source.firstVisibleLine + min(max(cy, 0), s.height - 1)
       selection = Selection(source: source, text: source as? ScreenText, anchor: (x, line), head: (x, line))
     } else {
       selection = nil

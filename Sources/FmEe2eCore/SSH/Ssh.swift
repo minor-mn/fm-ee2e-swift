@@ -224,9 +224,16 @@ class Ssh {
     return parseRemoteList(out, Date())
   }
 
-  /// [dir] のファイルシステムの容量（バイト）。
+  /// [dir] のファイルシステムの容量（バイト）と、接続先のメモリ（Linux の /proc/meminfo。なければ読まない）。
   func usage(_ dir: String) async throws -> DiskUsage? {
-    parseDf(String(decoding: try await run("df -kP \(shQuote(dir))"), as: UTF8.self))
+    let out = String(decoding: try await run("df -kP \(shQuote(dir)); s=$?; printf '\\0'; cat /proc/meminfo 2>/dev/null; exit $s"), as: UTF8.self)
+    let parts = out.split(separator: "\0", maxSplits: 1, omittingEmptySubsequences: false).map(String.init)
+    let disk = parseDf(parts[0])
+    let memory = parts.count > 1 ? parseMeminfo(parts[1]) : nil
+    if disk == nil && memory == nil {
+      return nil
+    }
+    return DiskUsage(total: disk?.total, used: disk?.used, free: disk?.free, memory: memory)
   }
 
   /// 接続先で使える圧縮の形式。zip は zip コマンド、tar.gz・tar.xz は tar と gzip・xz があるとき。

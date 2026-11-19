@@ -151,7 +151,8 @@ protocol SelectionSource: AnyObject {
 
 /// 画面の上に重ねた画面（[Screen.layer]）。
 final class ScreenLayer {
-  init(_ x: Int, _ y: Int, _ w: Int, _ h: Int, _ screen: Screen, selection: SelectionSource?, framed: Bool, fill: Rgb?) {
+  init(_ x: Int, _ y: Int, _ w: Int, _ h: Int, _ screen: Screen, selection: SelectionSource?, framed: Bool, fill: Rgb?, dim: Double = 0) {
+    self.dim = dim
     self.x = x
     self.y = y
     self.w = w
@@ -165,6 +166,9 @@ final class ScreenLayer {
   let fill: Rgb?
 
   let framed: Bool
+
+  /// 描いたあとに重ねる黒の濃さ（0〜1。選んでいない側の窓を暗くする）。
+  let dim: Double
 
   /// 親の画面のセルで数えた位置と大きさ。
   let x: Int
@@ -256,6 +260,7 @@ final class Screen {
     selection: SelectionSource? = nil,
     framed: Bool = false,
     fill: Rgb? = nil,
+    dim: Double = 0,
     _ draw: (Screen) -> Void
   ) {
     let w = max(0, min(w, width - x))
@@ -266,7 +271,7 @@ final class Screen {
     let (columns, rows) = sizer?.gridSize(w, h, from: self.theme, to: theme) ?? (w, h)
     let screen = Screen(max(0, columns), max(0, rows), theme: theme, sizer: sizer, clear: clear)
     draw(screen)
-    layers.append(ScreenLayer(x, y, w, h, screen, selection: selection, framed: framed, fill: fill))
+    layers.append(ScreenLayer(x, y, w, h, screen, selection: selection, framed: framed, fill: fill, dim: dim))
   }
 
   /// この画面と重ねた画面のカーソルを消す。
