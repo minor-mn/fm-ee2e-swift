@@ -677,6 +677,24 @@
       edit: "Edit author/message",
       delete: "Delete",
       back: "Back",
+      // Enter in the branch list
+      switch: "Switch",
+    },
+    // Deleting branches (git branch -d / -D)
+    delete_branches: {
+      // The branches to delete follow, one per line
+      message: "The following local branches will be deleted.",
+      yes: "Delete",
+      // The branches -d could not delete follow, one per line
+      unmerged: "The following branches are not fully merged and were not deleted. Force delete them?",
+      force_yes: "Force delete",
+      current: "The current branch cannot be deleted.",
+    },
+    // Branch states in the branch list
+    branch_flags: {
+      current: "current",
+      merged: "merged",
+      gone: "gone",
     },
     // Deleting tags (git tag -d)
     delete_tags: {
@@ -716,6 +734,7 @@
       file_commits: "No commits for this file yet.",
       files: "No files changed.",
       tags: "No tags yet.",
+      branches: "No branches yet.",
       range_commits: "No commits between these tags.",
     },
     no_diff: "No differences.",

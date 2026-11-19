@@ -115,6 +115,7 @@ final class GitPane: Pane {
         .enter: GitEnter(),
         .reload: GitReload(),
         .edit: GitEdit(),
+        .delete: GitDelete(),
         // シェルは、左がローカルなら左のフォルダーで、SSH なら接続先の左のフォルダーで実行する。
         .shell: ssh == nil ? LocalShell() : GitSshShell(),
         .transfer: RightTransfer(),
