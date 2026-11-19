@@ -30,6 +30,9 @@ class LogListView: Modal {
   /// Enter で開けるか。
   var openable: Bool { true }
 
+  /// 下の案内の、Enter の説明。
+  var openHint: String { tr("log_view.hints.open") }
+
   /// カーソルの項目（マークが1つだけならその項目）で Enter を押したとき。
   func open(_ index: Int) async throws {}
 
@@ -66,7 +69,7 @@ class LogListView: Modal {
   override var hints: [(String, String)] {
     [("↑↓ PgUp PgDn", tr("log_view.hints.move"))]
       + (markable ? [("Space", tr("log_view.hints.mark"))] : [])
-      + (openable ? [("Enter", tr("log_view.hints.open"))] : [])
+      + (openable ? [("Enter", openHint)] : [])
       + (editable ? [("E", tr("log_view.hints.edit"))] : [])
       + (deletable ? [("D", tr("log_view.hints.delete"))] : [])
       + [("Esc / q", tr("log_view.hints.back"))]
@@ -391,6 +394,131 @@ final class TagView: LogListView {
         commit.shortHash
       )
     }
+  }
+}
+
+/// 手元のブランチの一覧（コミットした日の新しい順）。Space でマークし、D でまとめて消す（git branch -d。マージされていない
+/// ものは、確かめてから -D）。Enter でそのブランチに切り替える。今いるブランチは消さない。
+final class BranchView: LogListView {
+  init(
+    _ app: App, _ close: @escaping (()) -> Void, _ git: Git, _ root: String, _ branches: [GitBranch],
+    hasChanges: Bool, onSwitched: @escaping () async -> Void
+  ) {
+    self.git = git
+    self.root = root
+    self.branches = branches
+    self.hasChanges = hasChanges
+    self.onSwitched = onSwitched
+    super.init(app, close, "git branch")
+  }
+
+  let git: Git
+  let root: String
+  var branches: [GitBranch]
+
+  /// コミットしていない変更があるか（切り替える前に確かめる）。
+  let hasChanges: Bool
+
+  /// ブランチを切り替えたあと（作業ツリーのファイルが変わるので、左の窓を読み直す）。
+  let onSwitched: () async -> Void
+
+  /// ブランチ名の列の幅。長すぎるものは切る。
+  private var nameWidth: Int { min(32, branches.map { textWidth($0.name) }.max() ?? 0) }
+
+  override var heading: String { tr("log_view.heading_count", ["title": title, "count": branches.count]) }
+
+  override var length: Int { branches.count }
+
+  override var markable: Bool { true }
+
+  override var deletable: Bool { true }
+
+  override var openHint: String { tr("log_view.hints.switch") }
+
+  override var empty: String { tr("log_view.empty.branches") }
+
+  private func reloadBranches() async throws {
+    let (git, root) = (git, root)
+    branches = try await app.withProgress(tr("log_view.running", ["command": "git branch"])) { try await git.branches(root) }
+    marks.removeAll()
+  }
+
+  /// 確かめてから消す。-d で消せなかった（マージされていない）ものは、名前を挙げてもう一度確かめ、-D で消す。
+  override func delete(_ indices: [Int]) async throws {
+    let targets = indices.map { branches[$0] }
+    let names = targets.filter { !$0.current }.map(\.name)
+    if names.isEmpty {
+      app.showStatus(tr("log_view.delete_branches.current"))
+      return
+    }
+    if !(await app.confirm(
+      "git branch -d",
+      ([tr("log_view.delete_branches.message")] + names).joined(separator: "\n"),
+      yes: tr("log_view.delete_branches.yes")
+    )) {
+      return
+    }
+    let (git, root) = (git, root)
+    // -d はマージされていないブランチで失敗するが、ほかは消える。残ったものを、読み直して見つける。
+    _ = try? await app.withProgress(tr("log_view.running", ["command": "git branch -d"])) {
+      try await git.deleteBranches(root, names, force: false)
+    }
+    try await reloadBranches()
+    let left = names.filter { name in branches.contains { $0.name == name } }
+    if left.isEmpty {
+      return
+    }
+    if !(await app.confirm(
+      "git branch -D",
+      ([tr("log_view.delete_branches.unmerged")] + left).joined(separator: "\n"),
+      yes: tr("log_view.delete_branches.force_yes")
+    )) {
+      return
+    }
+    try await app.withProgress(tr("log_view.running", ["command": "git branch -D"])) { try await git.deleteBranches(root, left, force: true) }
+    try await reloadBranches()
+  }
+
+  /// カーソルのブランチに切り替える。コミットしていない変更があれば確かめる（git switch と同じく持っていく）。
+  override func open(_ index: Int) async throws {
+    let branch = branches[index]
+    if branch.current {
+      return
+    }
+    if hasChanges,
+      !(await app.confirm(
+        tr("git_commands.branch.switch_title"),
+        tr("git_commands.branch.switch_with_changes"),
+        yes: tr("git_commands.branch.switch_yes")
+      ))
+    {
+      return
+    }
+    let (git, root) = (git, root)
+    try await app.withProgress(tr("log_view.running", ["command": "git switch"])) { try await git.switchBranch(root, branch.name) }
+    await onSwitched()
+    try await reloadBranches()
+  }
+
+  override func drawRow(_ screen: Screen, _ y: Int, _ w: Int, _ index: Int, _ style: Style) {
+    let branch = branches[index]
+    let c = branch.commit
+    // 先頭の2文字は、ほかの一覧のマーク（*）と空白に揃える。今いるブランチは、名前を黄緑の太字にする。
+    var x = 2
+    x += screen.text(
+      x, y, padRight(truncate(branch.name, nameWidth), nameWidth),
+      style.copyWith(fg: branch.current ? Palette.lime : Palette.text, bold: branch.current)
+    ) + 2
+    x += screen.text(x, y, c.shortHash, style.copyWith(fg: Palette.orange)) + 2
+    x += screen.text(x, y, c.date, style.copyWith(fg: Palette.muted)) + 2
+    // 状態（今いる・マージ済み・リモートで消えた）。
+    let flags =
+      (branch.current ? [tr("log_view.branch_flags.current")] : branch.merged ? [tr("log_view.branch_flags.merged")] : [])
+      + (branch.gone ? [tr("log_view.branch_flags.gone")] : [])
+    if !flags.isEmpty {
+      x += screen.text(x, y, flags.joined(separator: " "), style.copyWith(fg: branch.gone ? Palette.red : Palette.green)) + 2
+    }
+    screen.text(x, y, truncate(c.subject, max(0, w - x - 1)), style)
   }
 }
 

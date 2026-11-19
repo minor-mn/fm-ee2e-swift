@@ -336,6 +336,35 @@ class Git {
   /// 手元のブランチの名前。
   func localBranches(_ root: String) async throws -> [String] { try await refs(root, "refs/heads/") }
 
+  /// 手元のブランチと、その先頭のコミット（コミットした日の新しい順）。今のブランチ（HEAD）にマージ済みか、
+  /// 紐付け先のリモートのブランチが消えているかも読む。
+  func branches(_ root: String) async throws -> [GitBranch] {
+    let fields = [
+      "refname:short", "HEAD", "upstream:short", "upstream:track", "objectname", "objectname:short",
+      "committerdate:format:%Y-%m-%d %H:%M", "authorname", "subject",
+    ]
+    async let listRun = run(root, [
+      "for-each-ref", "--sort=-committerdate", "--format=" + fields.map { "%(\($0))" }.joined(separator: "%1f") + "%00", "refs/heads/",
+    ])
+    // まだコミットがない（HEAD がない）ときは失敗するので、マージ済みはなしとする。
+    async let mergedRun = run(root, ["for-each-ref", "--merged=HEAD", "--format=%(refname:short)", "refs/heads/"])
+    let (list, merged) = try await (listRun, mergedRun)
+    if list.exitCode != 0 {
+      throw failure(["for-each-ref"], list)
+    }
+    let mergedNames = merged.exitCode == 0 ? Set(splitOn(Git.decode(merged.stdoutData), "\n").map(trim)) : []
+    return parseGitBranches(Git.decode(list.stdoutData), mergedNames)
+  }
+
+  /// 手元のブランチ [names] を消す（[force] なら git branch -D、でなければ -d）。消せないものがあれば [ProcessError]
+  /// （-d では、消せるものは消える）。
+  func deleteBranches(_ root: String, _ names: [String], force: Bool) async throws {
+    let result = try await run(root, ["branch", force ? "-D" : "-d", "--"] + names)
+    if result.exitCode != 0 {
+      throw failure(["branch"], result)
+    }
+  }
+
   /// [remote] のブランチの名前（「origin/main」の形。origin/HEAD は除く）。最後に fetch したときのもの。
   func remoteBranches(_ root: String, _ remote: String) async throws -> [String] {
     try await refs(root, "refs/remotes/\(remote)/").filter { $0 != "\(remote)/HEAD" && $0 != remote }
@@ -1186,6 +1215,43 @@ struct GitCommit {
 
   /// メッセージの1行目。
   let subject: String
+}
+
+/// 手元のブランチ。
+struct GitBranch {
+  let name: String
+
+  /// 今いるブランチ。
+  let current: Bool
+
+  /// 紐付け先のリモートのブランチ（「origin/main」）。紐付いていなければ空。
+  let upstream: String
+
+  /// 紐付け先のリモートのブランチが、もうない（fetch で消えたことが分かった）。
+  let gone: Bool
+
+  /// 今のブランチ（HEAD）にマージ済み。
+  let merged: Bool
+
+  /// 先頭のコミット。
+  let commit: GitCommit
+}
+
+/// `git for-each-ref` の「名前・HEAD・紐付け先・追跡の状態・ハッシュ・短いハッシュ・日時・作者・1行目」を \x1f で区切り、
+/// \0 で終えた出力を読む。[merged] は今のブランチにマージ済みのブランチの名前。
+func parseGitBranches(_ output: String, _ merged: Set<String>) -> [GitBranch] {
+  splitOn(output, "\0").compactMap { record in
+    let fields = splitOn(trim(record), "\u{1f}")
+    guard fields.count == 9 else { return nil }
+    return GitBranch(
+      name: fields[0],
+      current: fields[1] == "*",
+      upstream: fields[2],
+      gone: fields[3] == "[gone]",
+      merged: merged.contains(fields[0]),
+      commit: GitCommit(fields[4], fields[5], fields[6], fields[7], fields[8])
+    )
+  }
 }
 
 /// タグと、それが指すコミット。

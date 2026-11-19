@@ -307,6 +307,8 @@ private final class GitActions {
     // pull とブランチのリネームは、ブランチにいるときだけ（pull は push の上、リネームは一番下）。
     let onNamedBranch = onBranch && selected[0].text != "(no branch)"
     if onBranch {
+      // 手元のブランチの一覧は、ブランチ名の行のメニューの一番上。
+      commands.insert("git branch", at: 0)
       commands += ["git log"] + (onNamedBranch ? ["git pull"] : [])
       commands += ["git push", "git push --force-with-lease", "git push --tags", "git switch -c", "git tag", "git tag -a", "git push tag", "git push --delete tag"]
     }
@@ -347,6 +349,14 @@ private final class GitActions {
       }
       pane.marks.clear()
       // git status の読み直しは、_run が終わったときに行う。
+      return
+    }
+    if command == "git branch" {
+      let branches = try await app.withProgress(tr("git_commands.running", ["command": "git branch"])) { try await pane.git.branches(root) }
+      let hasChanges = pane.hasChanges
+      await app.showModal { (close: @escaping (()) -> Void) in
+        BranchView(app, close, pane.git, root, branches, hasChanges: hasChanges) { [weak self] in await self?.onFilesChanged() }
+      }
       return
     }
     if command == "git log" && onFile {
