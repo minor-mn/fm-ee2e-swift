@@ -183,6 +183,9 @@ class Pane {
   /// 上の帯に出す容量の項目（Total・Used・Free のうち）。
   var usageLabels: [String] { ["Total", "Used", "Free"] }
 
+  /// 上の帯の容量の右に出すメモリ（ローカルのタブは Mac、SSH・Container は Linux の接続先）。出さなければ nil。
+  var memory: MemoryUsage? { nil }
+
   /// 上の帯に、容量（Total・Used・Free）の代わりに出す文。容量を出すなら nil。
   var headerText: String? { nil }
 

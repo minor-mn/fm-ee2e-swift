@@ -9,6 +9,7 @@ final class ICloudPane: LocalPane {
 
   /// ほかのアプリとのファイルの受け渡しは、今はローカルだけ。
   override var dragsFiles: Bool { false }
+  override var memory: MemoryUsage? { nil }
 
   /// フォルダーを読めなかった理由。
   private var problem: String?

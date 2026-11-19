@@ -34,6 +34,9 @@ enum Operation: Hashable {
 
   /// G・F12。右のタブの転送（[Pane.transferCommand]）。
   case transfer
+
+  /// 転送タブの F12。終わった転送の履歴を消す。
+  case clearHistory
 }
 
 /// コマンドに渡す環境。[targets] は [runCommand] で確定済み。

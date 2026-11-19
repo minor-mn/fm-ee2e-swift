@@ -40,6 +40,11 @@ func drawUsage(_ screen: Screen, _ y: Int, _ pane: Pane) {
     x += screen.text(x, y, label, bg.copyWith(fg: Palette.muted))
     x += screen.text(x + 1, y, value, bg) + 1
   }
+  if let memory = pane.memory {
+    x += 3
+    x += screen.text(x, y, "Memory", bg.copyWith(fg: Palette.muted))
+    screen.text(x + 1, y, "\(formatBytes(memory.used)) / \(formatBytes(memory.total))", bg)
+  }
 }
 
 /// [pane] のカーソル位置の項目の所有者・グループ・パーミッション。

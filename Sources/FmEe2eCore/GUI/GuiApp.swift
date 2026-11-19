@@ -170,6 +170,11 @@ private final class GuiAppDelegate: NSObject, NSApplicationDelegate, NSWindowDel
     return false
   }
 
+  /// 窓が選ばれた・外れた（ほかのアプリに移ったときを含む）。選ばれていない間は暗く描くので、描き直す。
+  func windowDidBecomeKey(_ notification: Notification) { host?.view?.needsDisplay = true }
+
+  func windowDidResignKey(_ notification: Notification) { host?.view?.needsDisplay = true }
+
   /// このアプリをもう1つ起動して、新しい窓を開く（メニューの「fm-ee2e-swift を開く」・⌘S）。
   @objc func openNewInstance(_ sender: Any?) {
     let bundle = Bundle.main.bundleURL

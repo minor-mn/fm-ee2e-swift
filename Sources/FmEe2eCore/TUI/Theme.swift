@@ -194,6 +194,9 @@ nonisolated struct Appearance: Sendable {
   /// 窓の後ろをぼかす。
   var blur = false
 
+  /// 選んでいない側の窓（タブ）に重ねる黒の濃さ（0〜1）。0 なら暗くしない。
+  var inactiveDim = 0.5
+
   /// タブごとの見た目（default を引き継いだもの）。
   var tabs: [ThemeKey: Theme] = [:]
 
